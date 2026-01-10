@@ -1,0 +1,367 @@
+import json
+import re
+from typing import Optional, List, Any
+
+import pymysql
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
+
+from config import db_config
+router1 = APIRouter()
+
+
+
+class ConditionBody(BaseModel):
+    age: Optional[str] = None
+    major: Optional[List[str]] = None
+    skills: Optional[List[str]] = None
+    degree: Optional[str] = None
+    bachelor_school_level: Optional[str] = None
+    post_graduate_school_level: Optional[str] = None
+    is_engineering_degree: Optional[bool] = None
+    status: Optional[int] = 1
+
+
+
+def _get_connection():
+    return pymysql.connect(**db_config, cursorclass=pymysql.cursors.DictCursor)
+
+
+def _dump_condition_json(condition_dict: dict) -> str:
+    return json.dumps(condition_dict, ensure_ascii=False) #生成json格式
+
+
+def _parse_condition_json(raw_value: Any) -> dict:
+    if not raw_value:
+        return {}
+    if isinstance(raw_value, dict):
+        return raw_value
+    if isinstance(raw_value, str):
+        try:
+            return json.loads(raw_value)
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+def _format_condition_summary(condition: dict) -> str:
+    parts = []
+
+    age = condition.get("age")
+    if age:
+        parts.append(f"年龄:{age}")   #'年龄:<30'
+
+    majors = condition.get("major")
+    if majors:
+        if isinstance(majors, list):
+            parts.append(f"专业:{'/'.join(majors)}")
+        else:
+            parts.append(f"专业:{majors}")
+
+    skills = condition.get("skills")
+    if skills:
+        if isinstance(skills, list):
+            parts.append(f"技能:{'/'.join(skills)}")
+        else:
+            parts.append(f"技能:{skills}")
+
+    degree = condition.get("degree")
+    if degree:
+        parts.append(f"学历:{degree}")
+
+    bachelor_school_level = condition.get("bachelor_school_level")
+    if bachelor_school_level is not None:
+        parts.append(f"本科学校水平:{bachelor_school_level}")
+
+    post_graduate_school_level = condition.get("post_graduate_school_level")
+    if post_graduate_school_level is not None:
+
+        parts.append(f"研究生学校水平:{post_graduate_school_level}")
+
+    is_engineering_degree = condition.get("is_engineering_degree")
+    if is_engineering_degree is not None:
+        parts.append(f"是否工科:{'是' if is_engineering_degree else '否'}")
+
+    return "；".join(parts) if parts else "无筛选条件" #"学历:硕士;是否工科:否"
+
+
+@router1.post('/add_filter_condition',summary='新增筛选条件')
+async def add_filter_condition(req: ConditionBody):
+    conn = _get_connection()
+    cursor = conn.cursor()
+
+    try:
+        # 1) 取出要存的 JSON（去掉 None 字段）
+        condition_dict = req.model_dump(exclude_none=True)        #model_dump转为字典
+        condition_json_str = _dump_condition_json(condition_dict) #转为json格式，去掉none的条件
+
+        # 2) 插入
+        sql = """
+        INSERT INTO filter_condition (condition_json, is_deleted)
+        VALUES (%s, 0)
+        """
+        cursor.execute(sql, condition_json_str)
+        conn.commit()
+
+        new_filter_condition_id = cursor.lastrowid
+        return {"msg": "ok", "id": new_filter_condition_id}
+
+    except pymysql.MySQLError as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        cursor.close()
+        conn.close() #try模块中有return也会执行finally
+
+
+@router1.get("/list_filter_condition_summary", summary="筛选条件简介列表")
+async def list_filter_condition_summary():
+    conn = _get_connection()
+    cursor = conn.cursor()
+    try:
+        sql = """
+        SELECT id, condition_json, status
+        FROM filter_condition
+        WHERE is_deleted=0
+        ORDER BY id DESC
+        """
+        cursor.execute(sql)
+        rows = cursor.fetchall()
+
+        summaries = []
+        for row in rows:
+            condition_json = _parse_condition_json(row.get("condition_json")) #condition_json是字典
+            summaries.append(
+                {
+                    "id": row["id"],
+                    "status": row["status"],
+                    "summary": _format_condition_summary(condition_json), #这个是返回字符串
+                    "condition": condition_json,
+                }
+            )
+
+        return {"total": len(summaries), "list": summaries}
+
+    except pymysql.MySQLError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
+
+
+
+
+class UpdateFilterConditionReq(BaseModel):
+    id: int = Field(..., gt=0)
+    condition: Optional[ConditionBody] = None
+    status: Optional[int] = Field(None, description="0-不可选 1-可选")
+
+
+@router1.put("/update_filter_condition", summary="更新筛选条件")
+async def update_filter_condition(req: UpdateFilterConditionReq):
+    conn = _get_connection()
+
+    cursor = conn.cursor()
+    try:
+        update_fields = []  #['name=%s','condition_json={'major':..,'skill':..}','status:%s']
+        params = []
+
+        if req.condition is not None:
+            condition_dict = req.condition.model_dump(exclude_none=True)
+            condition_json_str = _dump_condition_json(condition_dict)
+            update_fields.append("condition_json=%s")
+
+            params.append(condition_json_str)
+
+        if req.status is not None:
+            update_fields.append("status=%s")
+            params.append(req.status)
+
+        if not update_fields:
+            raise HTTPException(status_code=400, detail="没有需要更新的字段")
+
+        sql = f"""
+        UPDATE filter_condition
+        SET {",".join(update_fields)}
+        WHERE id=%s AND is_deleted=0
+        """
+        params.append(req.id)
+
+        cursor.execute(sql, params)     #占位符+绑定参数
+        conn.commit()
+
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="记录不存在或已删除")
+
+        return {"msg": "ok"}
+
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
+
+
+@router1.delete("/delete_filter_condition", summary="删除筛选条件（逻辑删除）")
+async def delete_filter_condition(id: int = Query(..., gt=0)):
+    conn = _get_connection()
+    cursor = conn.cursor()
+    try:
+        sql = """
+        UPDATE filter_condition
+        SET is_deleted=1
+        WHERE id=%s AND is_deleted=0
+        """
+        cursor.execute(sql, (id,))
+        conn.commit()
+
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="记录不存在或已删除")
+
+        return {"msg": "ok"}
+
+    except pymysql.MySQLError as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
+
+
+def _split_list_param(v: str) -> list[str]:
+    """
+    支持：'a,b' / 'a b' / 'a, b' / 'a  b'
+    """
+    return [x for x in re.split(r"[,\s]+", v.strip()) if x]
+
+
+
+
+@router1.get("/list_filter_condition", summary="分页查询筛选条件（支持多状态+多条件）")
+async def list_filter_condition(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+
+    # 表字段 status：支持多状态
+    statuses: str | None = Query(None, description="表字段status多状态：如 0,1 或 0 1"),
+
+    # ======= condition_json 内的筛选条件（多条件 AND） =======
+    age: str | None = Query(None, description="condition_json.age （如 >40 ）"),
+    majors: str | None = Query(None, description="condition_json.major 包含：如 计算机,软件工程"),
+    skills: str | None = Query(None, description="condition_json.skills 包含：如 Python,FastAPI"),
+    degree: str | None = Query(None, description="condition_json.degree 如：本科/硕士"),
+    bachelor_school_level: int | None = Query(None, description="condition_json.bachelor_school_level "),
+    post_graduate_school_level: int | None = Query(None, description="condition_json.post_graduate_school_level "),
+    is_engineering_degree: bool | None = Query(None, description="condition_json.is_engineering_degree  true/false"),
+):
+    conn = _get_connection()
+    cursor = conn.cursor()
+    try:
+        where = ["is_deleted=0"]
+        params: list = []
+
+        # 1) 多状态（表字段 status）
+        if statuses:
+            status_list = [int(s) for s in _split_list_param(statuses)]
+            if status_list:
+                where.append("status IN (" + ",".join(["%s"] * len(status_list)) + ")")
+                params.extend(status_list)
+
+        # 2) ======= condition_json 多条件（全部 AND） =======
+
+        # age：你存的是字符串（Optional[str]），这里做“精确匹配”
+        if age:
+            where.append("JSON_UNQUOTE(JSON_EXTRACT(condition_json, '$.age')) = %s")
+            params.append(age)
+
+        # major：包含其一即可
+        if majors: #'计算机,信息工程'
+            major_list = _split_list_param(majors) #['计算机','信息工程']
+            if major_list:
+                or_parts = []
+                for m in major_list:
+                    or_parts.append(
+                        "JSON_CONTAINS(condition_json, JSON_QUOTE(%s), '$.major')"
+                    ) #JSON_CONTAINS(condition_json, JSON_QUOTE('计算机'), '$.major')  condition_json里的major数据，是不是 “计算机”。
+                    params.append(m)    #or_parts = ["JSON_CONTAINS(condition_json, JSON_QUOTE(%s), '$.major')",
+                                                      # "JSON_CONTAINS(condition_json, JSON_QUOTE(%s), '$.major')"]
+                where.append(f"{" OR ".join(or_parts)}")
+
+        # skills：包含其一即可
+        if skills:
+            skill_list = _split_list_param(skills)
+            if skill_list:
+                or_parts = []
+                for sk in skill_list:
+                    or_parts.append(
+                        "JSON_CONTAINS(condition_json, JSON_QUOTE(%s), '$.skills')"
+                    )
+                    params.append(sk)
+                where.append(f"{" OR ".join(or_parts)}")
+
+        # degree：字符串精确匹配
+        if degree:
+            where.append("JSON_UNQUOTE(JSON_EXTRACT(condition_json, '$.degree')) = %s") #从condition_json中提取degree键
+                                                                        # 的值，判断是否等于%s对应的参数（比如‘本科’）”。unquote是去掉双引号
+            params.append(degree)
+
+        # bachelor_school_level：
+        if bachelor_school_level:
+            where.append("""
+                JSON_UNQUOTE(
+                    JSON_EXTRACT(condition_json, '$.bachelor_school_level')
+                ) LIKE %s
+            """)
+            params.append(f"%{bachelor_school_level}%")
+
+        # post_graduate_school_level：数字精确匹配
+        if post_graduate_school_level:
+            where.append("""
+                JSON_UNQUOTE(
+                    JSON_EXTRACT(condition_json, '$.post_graduate_school_level')
+                ) LIKE %s
+            """)
+            params.append(f"%{post_graduate_school_level}%")
+
+        # is_engineering_degree：布尔精确匹配
+        if is_engineering_degree is not None:
+            # MySQL JSON true/false 取出来后，用 1/0 比较最稳
+            where.append("CAST(JSON_UNQUOTE(JSON_EXTRACT(condition_json, '$.is_engineering_degree')) AS UNSIGNED) = %s")
+            params.append(1 if is_engineering_degree else 0)
+
+        where_sql = " AND ".join(where)
+
+        # 3) total
+        cursor.execute(f"SELECT COUNT(*) AS cnt FROM filter_condition WHERE {where_sql}", params)
+        total_row = cursor.fetchone()
+        total = total_row["cnt"] if total_row else 0
+
+        # 4) list
+        offset = (page - 1) * page_size
+        cursor.execute(
+            f"""
+            SELECT id, condition_json, status, is_deleted, created_at, updated_at
+            FROM filter_condition
+            WHERE {where_sql}
+            ORDER BY id DESC
+            LIMIT %s OFFSET %s
+            """,
+            params + [page_size, offset],
+        )
+        rows = cursor.fetchall()
+
+        # 5) 输出统一：condition_json -> dict
+        for row in rows:
+            row["condition_json"] = _parse_condition_json(row.get("condition_json"))
+
+        return {"total": total, "page": page, "page_size": page_size, "list": rows}
+
+    except pymysql.MySQLError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
