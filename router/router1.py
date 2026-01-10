@@ -83,6 +83,23 @@ def _format_condition_summary(condition: dict) -> str:
 
     return "；".join(parts) if parts else "无筛选条件" #"学历:硕士;是否工科:否"
 
+def _clean_condition_dict(condition_dict: dict) -> dict:
+    """
+    清理条件字典：移除值为无效值的键
+    无效值包括：None、空字符串、"string"、"null"、纯空格字符串
+    """
+    invalid_values = [None, "", "string", "null"]
+    cleaned_dict = {}
+    for key, value in condition_dict.items():
+        # 跳过无效值
+        if value in invalid_values:
+            continue
+        # 处理字符串：去掉首尾空格后如果为空，也跳过
+        if isinstance(value, str) and value.strip() == "":
+            continue
+        # 保留有效值
+        cleaned_dict[key] = value
+    return cleaned_dict
 
 @router1.post('/add_filter_condition',summary='新增筛选条件')
 async def add_filter_condition(req: ConditionBody):
@@ -92,6 +109,7 @@ async def add_filter_condition(req: ConditionBody):
     try:
         # 1) 取出要存的 JSON（去掉 None 字段）
         condition_dict = req.model_dump(exclude_none=True)        #model_dump转为字典
+        condition_dict = _clean_condition_dict(condition_dict)  # 再过滤"string"/空字符串等
         condition_json_str = _dump_condition_json(condition_dict) #转为json格式，去掉none的条件
 
         # 2) 插入
@@ -99,7 +117,7 @@ async def add_filter_condition(req: ConditionBody):
         INSERT INTO filter_condition (condition_json, is_deleted)
         VALUES (%s, 0)
         """
-        cursor.execute(sql, condition_json_str)
+        cursor.execute(sql, condition_json_str) #("""INSERT INTO filter_condition (condition_json, is_deleted)VALUES (%s, 0)""",condition_json_str)
         conn.commit()
 
         new_filter_condition_id = cursor.lastrowid
@@ -169,6 +187,7 @@ async def update_filter_condition(req: UpdateFilterConditionReq):
 
         if req.condition is not None:
             condition_dict = req.condition.model_dump(exclude_none=True)
+            condition_dict = _clean_condition_dict(condition_dict)  # 新增这行
             condition_json_str = _dump_condition_json(condition_dict)
             update_fields.append("condition_json=%s")
 

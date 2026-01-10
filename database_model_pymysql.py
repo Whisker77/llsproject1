@@ -53,7 +53,7 @@ ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 comment = '筛选条件表';
     create_table_sql3 = """
         CREATE TABLE IF NOT EXISTS talent_info_table (
             id int auto_increment primary key comment '主键id',
-            filter_condition id not null comment '筛选条件的id',
+            filter_condition_id int not null comment '筛选条件的id',
             candidate_name varchar(50) not null comment '候选人姓名',
             age int not null comment '候选人年龄',
             contact varchar(50) comment '联系方式',
