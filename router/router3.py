@@ -61,10 +61,10 @@ async def talent_list(condition:TalentCondition=Depends()): #依赖注入使得g
             params.append(condition.select_day)
         if where:
             where_sql = ' AND '.join(where)
-            complete_sql = f'select * from talent_info_table {where_sql}'
+            complete_sql = f'select * from talent_info_table where {where_sql}'
             cursor.execute(complete_sql, params)
             data = cursor.fetchall()
-            if len(data) > 1:
+            if len(data) >= 1:
                 cursor.close()
                 conn.close()
                 return data
