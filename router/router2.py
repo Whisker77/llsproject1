@@ -306,53 +306,53 @@ def fetch_filter_condition(filter_condition_id: int) -> dict:
 def llm_judge_resume_match(resume_info: dict, condition: dict) -> bool:
     if not condition:
         return True
+    if condition.get('bachelor_school_level') or condition.get('graduate_school_level'):
+        def _level_tokens(level_value: str) -> set[str]:
+            if not level_value:
+                return set()
+            normalized = str(level_value).strip() #985211
+            if normalized in {"无", "未知", "null", "None"}:
+                return set()
+            tokens = set()
+            if "985" in normalized:
+                tokens.add("985")
+            if "211" in normalized:
+                tokens.add("211")
+            return tokens   #(985,211)
 
-    def _level_tokens(level_value: str) -> set[str]:
-        if not level_value:
-            return set()
-        normalized = str(level_value).strip()
-        if normalized in {"无", "未知", "null", "None"}:
-            return set()
-        tokens = set()
-        if "985" in normalized:
-            tokens.add("985")
-        if "211" in normalized:
-            tokens.add("211")
-        return tokens
+        def _school_level_ok(cond_value: str, resume_value: str) -> bool:
+            cond_tokens = _level_tokens(cond_value)
+            if not cond_tokens:
+                return True
+            resume_tokens = _level_tokens(resume_value)
+            if not resume_tokens:
+                return False
+            return cond_tokens.issubset(resume_tokens)
 
-    def _school_level_ok(cond_value: str, resume_value: str) -> bool:
-        cond_tokens = _level_tokens(cond_value)
-        if not cond_tokens:
+        school_level_requirements = {
+            "bachelor_school_level": (
+                condition.get("bachelor_school_level"),
+                resume_info.get("本科学校水平"),
+            ),
+            "graduate_school_level": (
+                condition.get("graduate_school_level"),
+                resume_info.get("研究生毕业学校水平"),
+            ),
+        }
+        for key, (cond_val, resume_val) in school_level_requirements.items():
+            if cond_val is None or cond_val == "":
+                continue
+            if not _school_level_ok(cond_val, resume_val):
+                return False
+
+        remaining_condition = {
+            key: value
+            for key, value in condition.items()
+            if key not in school_level_requirements
+        }
+        if not remaining_condition:
             return True
-        resume_tokens = _level_tokens(resume_value)
-        if not resume_tokens:
-            return False
-        return cond_tokens.issubset(resume_tokens)
-
-    school_level_requirements = {
-        "bachelor_school_level": (
-            condition.get("bachelor_school_level"),
-            resume_info.get("本科学校水平"),
-        ),
-        "graduate_school_level": (
-            condition.get("graduate_school_level"),
-            resume_info.get("研究生毕业学校水平"),
-        ),
-    }
-    for key, (cond_val, resume_val) in school_level_requirements.items():
-        if cond_val is None or cond_val == "":
-            continue
-        if not _school_level_ok(cond_val, resume_val):
-            return False
-
-    remaining_condition = {
-        key: value
-        for key, value in condition.items()
-        if key not in school_level_requirements
-    }
-    if not remaining_condition:
-        return True
-    condition = remaining_condition
+        condition = remaining_condition
 
     if "skills" in condition:
         skills_val = condition["skills"]   #['python,sql']
