@@ -229,9 +229,9 @@ def fetch_filter_condition(filter_condition_id: int) -> dict:
         if conn:
             conn.close()
 
-def llm_judge_resume_match(resume_info: dict, condition: dict) -> bool:
+def llm_judge_resume_match(resume_info: dict, condition: dict) -> tuple[bool, str]:
     if not condition:
-        return True
+        return True, "未设置筛选条件，默认通过"
 
     if "skills" in condition:
         skills_val = condition["skills"]   #['python,sql']
@@ -271,7 +271,7 @@ def llm_judge_resume_match(resume_info: dict, condition: dict) -> bool:
             temperature=0
         )
         content = response.choices[0].message.content.strip() #content = '是' 或者 '否'
-        return content.startswith("是")
+        return content.startswith("是"), content
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"大模型筛选失败: {str(e)}")
 
@@ -311,7 +311,7 @@ async def process_resumes(
             except HTTPException as e:
                 raise ValueError(f"大模型处理失败: {e.detail}") from e
 
-            is_match = llm_judge_resume_match(resume_info, condition_json)
+            is_match, llm_match_reason = llm_judge_resume_match(resume_info, condition_json)
             pdf_bucket = "b-bucket" if is_match else "a-bucket"
      
             avatar_bucket = "candidate-avatar" if is_match else "resume-avatar"
@@ -527,6 +527,7 @@ async def process_resumes(
                     "PDF MinIO路径": pdf_minio_path,
                     "头像MinIO路径": avatar_minio_path,
                     "人才库入库状态": talent_status,
+                    "大模型筛选结果": llm_match_reason,
                     "提取的核心信息": {
                         "姓名": resume_info["姓名"],
                         "专业": resume_info["专业"],
@@ -551,6 +552,7 @@ async def process_resumes(
                 "筛选条件ID": filter_condition_id,
                 "是否满足筛选条件": is_match,
                 "人才库入库状态": talent_status,
+                "大模型筛选结果": llm_match_reason,
                 "提取的核心信息": {
                     "姓名": resume_info["姓名"],
                     '年龄': resume_info['年龄'],
