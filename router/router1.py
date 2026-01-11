@@ -12,13 +12,13 @@ router1 = APIRouter()
 
 
 class ConditionBody(BaseModel):
-    age: Optional[str] = None
-    major: Optional[List[str]] = None
-    skills: Optional[List[str]] = None
-    degree: Optional[str] = None
-    bachelor_school_level: Optional[str] = None
-    post_graduate_school_level: Optional[str] = None
-    is_engineering_degree: Optional[bool] = None
+    age: Optional[str] = Field(None)
+    major: Optional[List[str]] = Field(None)
+    skills: Optional[List[str]] = Field(None)
+    degree: Optional[str] = Field(None)
+    bachelor_school_level: Optional[str] = Field(None)
+    post_graduate_school_level: Optional[str] = Field(None)
+    is_engineering_degree: Optional[bool] = Field(None)
     status: Optional[int] = 1
 
 
@@ -138,9 +138,8 @@ async def list_filter_condition_summary():
     cursor = conn.cursor()
     try:
         sql = """
-        SELECT id, condition_json, status
+        SELECT id, condition_json, status,is_deleted
         FROM filter_condition
-        WHERE is_deleted=0
         ORDER BY id DESC
         """
         cursor.execute(sql)
@@ -153,6 +152,7 @@ async def list_filter_condition_summary():
                 {
                     "id": row["id"],
                     "status": row["status"],
+                    'is_deleted': row["is_deleted"],
                     "summary": _format_condition_summary(condition_json), #这个是返回字符串
                     "condition": condition_json,
                 }
@@ -173,7 +173,6 @@ async def list_filter_condition_summary():
 class UpdateFilterConditionReq(BaseModel):
     id: int = Field(..., gt=0)
     condition: Optional[ConditionBody] = None
-    status: Optional[int] = Field(None, description="0-不可选 1-可选")
 
 
 @router1.put("/update_filter_condition", summary="更新筛选条件")
@@ -193,9 +192,6 @@ async def update_filter_condition(req: UpdateFilterConditionReq):
 
             params.append(condition_json_str)
 
-        if req.status is not None:
-            update_fields.append("status=%s")
-            params.append(req.status)
 
         if not update_fields:
             raise HTTPException(status_code=400, detail="没有需要更新的字段")
@@ -256,7 +252,6 @@ def _split_list_param(v: str) -> list[str]:
     支持：'a,b' / 'a b' / 'a, b' / 'a  b'
     """
     return [x for x in re.split(r"[,\s]+", v.strip()) if x]
-
 
 
 
