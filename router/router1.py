@@ -17,7 +17,7 @@ class ConditionBody(BaseModel):
     skills: Optional[str] = Field(None)
     degree: Optional[str] = Field(None)
     bachelor_school_level: Optional[str] = Field(None)
-    post_graduate_school_level: Optional[str] = Field(None)
+    graduate_school_level: Optional[str] = Field(None)
     is_engineering_degree: Optional[str] = Field(None)
     status: Optional[int] = 1
 
@@ -72,10 +72,10 @@ def _format_condition_summary(condition: dict) -> str:
     if bachelor_school_level is not None:
         parts.append(f"本科学校水平:{bachelor_school_level}")
 
-    post_graduate_school_level = condition.get("post_graduate_school_level")
-    if post_graduate_school_level is not None:
+    graduate_school_level = condition.get("graduate_school_level")
+    if graduate_school_level is not None:
 
-        parts.append(f"研究生学校水平:{post_graduate_school_level}")
+        parts.append(f"研究生学校水平:{graduate_school_level}")
 
     is_engineering_degree = condition.get("is_engineering_degree")
     if is_engineering_degree is not None:
@@ -269,7 +269,7 @@ async def list_filter_condition(
     skills: str | None = Query(None, description="包含：如 Python,FastAPI"),
     degree: str | None = Query(None, description="如：本科/硕士"),
     bachelor_school_level: int | None = Query(None, description="985,211?"),
-    post_graduate_school_level: int | None = Query(None, description="985,211?"),
+    graduate_school_level: int | None = Query(None, description="985,211?"),
     is_engineering_degree: str | None = Query(None, description="是/否"),
 ):
     conn = _get_connection()
@@ -333,13 +333,13 @@ async def list_filter_condition(
             params.append(f"%{bachelor_school_level}%")
 
         # post_graduate_school_level：数字精确匹配
-        if post_graduate_school_level:
+        if graduate_school_level:
             where.append("""
                 JSON_UNQUOTE(
-                    JSON_EXTRACT(condition_json, '$.post_graduate_school_level')
+                    JSON_EXTRACT(condition_json, '$.graduate_school_level')
                 ) LIKE %s
             """)
-            params.append(f"%{post_graduate_school_level}%")
+            params.append(f"%{graduate_school_level}%")
 
         # is_engineering_degree：
         if is_engineering_degree is not None:
