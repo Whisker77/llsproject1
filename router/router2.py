@@ -206,17 +206,19 @@ def fetch_filter_condition(filter_condition_id: int) -> dict:
         conn = pymysql.connect(**DB_CONF)
         cursor = conn.cursor()
         sql = """
-            SELECT condition_json, status
+            SELECT condition_json, status,is_deleted
             FROM filter_condition
-            WHERE id=%s AND is_deleted=0
+            WHERE id=%s 
         """
         cursor.execute(sql, (filter_condition_id,))
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="筛选条件不存在或已删除")
-        condition_json, status = row
+        condition_json, status,is_deleted = row
         if status != 1:
             raise HTTPException(status_code=400, detail="筛选条件不可用")
+        if is_deleted == 1:
+            raise HTTPException(status_code =400,detail='筛选条件已被逻辑删除')
         if isinstance(condition_json, str):
             try:
                 condition_json = json.loads(condition_json)
