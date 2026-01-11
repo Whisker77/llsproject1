@@ -5,6 +5,7 @@ import fitz  # PyMuPDF
 import pymysql
 import os
 import requests
+import re
 from openai import OpenAI
 from datetime import timedelta
 import json
@@ -122,6 +123,69 @@ def extract_pdf_content_and_avatar(pdf_bytes: bytes):
         doc.close()
 
 # ====================== 3. 大模型筛选+信息提取 ======================
+_KNOWN_985_SCHOOLS = {
+    "北京大学",
+    "清华大学",
+    "复旦大学",
+    "上海交通大学",
+    "南京大学",
+    "浙江大学",
+    "中国科学技术大学",
+    "哈尔滨工业大学",
+    "西安交通大学",
+    "北京航空航天大学",
+    "北京理工大学",
+    "同济大学",
+    "东南大学",
+    "天津大学",
+    "南开大学",
+    "中山大学",
+    "华中科技大学",
+    "武汉大学",
+    "厦门大学",
+    "山东大学",
+    "吉林大学",
+    "四川大学",
+    "重庆大学",
+    "华南理工大学",
+    "中国人民大学",
+    "北京师范大学",
+    "中国农业大学",
+    "西北工业大学",
+    "大连理工大学",
+    "中南大学",
+    "湖南大学",
+    "中国海洋大学",
+    "兰州大学",
+    "电子科技大学",
+    "西北农林科技大学",
+    "东北大学",
+    "中国地质大学(武汉)",
+    "中国地质大学(北京)",
+    "中央民族大学",
+}
+
+
+def _normalize_school_level(level: str) -> str:
+    if not level:
+        return "未知"
+    normalized = level.strip()
+    if normalized in {"无", "未知", "null", "None"}:
+        return "未知"
+    return normalized
+
+
+def _infer_school_level(school_name: str, current_level: str) -> str:
+    level = _normalize_school_level(current_level)
+    if level != "未知":
+        return level
+    if not school_name:
+        return level
+    if school_name.strip() in _KNOWN_985_SCHOOLS:
+        return "985"
+    return level
+
+
 def llm_process_resume(resume_text: str) -> dict:
     """大模型筛提取简历信息"""
     prompt = f"""
@@ -183,8 +247,8 @@ def llm_process_resume(resume_text: str) -> dict:
         if not content:
             raise HTTPException(status=500,detail='未解析出结构化的简历信息')
         for line in content[:]:
-            if ":" in line:
-                key, val = line.split(":", 1)
+            if ":" in line or "：" in line:
+                key, val = re.split(r"[:：]", line, maxsplit=1)
                 key = key.strip()
                 val = val.strip()
                 if key in resume_info:
@@ -195,6 +259,14 @@ def llm_process_resume(resume_text: str) -> dict:
             resume_info["技能"] = skill_list  # 直接存数组，不是JSON字符串
         else:
             resume_info["技能"] = []
+        resume_info["本科学校水平"] = _infer_school_level(
+            resume_info.get("本科毕业院校"),
+            resume_info.get("本科学校水平"),
+        )
+        resume_info["研究生毕业学校水平"] = _infer_school_level(
+            resume_info.get("研究生毕业院校"),
+            resume_info.get("研究生毕业学校水平"),
+        )
         return resume_info
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"大模型处理失败: {str(e)}")
@@ -234,6 +306,53 @@ def fetch_filter_condition(filter_condition_id: int) -> dict:
 def llm_judge_resume_match(resume_info: dict, condition: dict) -> bool:
     if not condition:
         return True
+
+    def _level_tokens(level_value: str) -> set[str]:
+        if not level_value:
+            return set()
+        normalized = str(level_value).strip()
+        if normalized in {"无", "未知", "null", "None"}:
+            return set()
+        tokens = set()
+        if "985" in normalized:
+            tokens.add("985")
+        if "211" in normalized:
+            tokens.add("211")
+        return tokens
+
+    def _school_level_ok(cond_value: str, resume_value: str) -> bool:
+        cond_tokens = _level_tokens(cond_value)
+        if not cond_tokens:
+            return True
+        resume_tokens = _level_tokens(resume_value)
+        if not resume_tokens:
+            return False
+        return cond_tokens.issubset(resume_tokens)
+
+    school_level_requirements = {
+        "bachelor_school_level": (
+            condition.get("bachelor_school_level"),
+            resume_info.get("本科学校水平"),
+        ),
+        "graduate_school_level": (
+            condition.get("graduate_school_level"),
+            resume_info.get("研究生毕业学校水平"),
+        ),
+    }
+    for key, (cond_val, resume_val) in school_level_requirements.items():
+        if cond_val is None or cond_val == "":
+            continue
+        if not _school_level_ok(cond_val, resume_val):
+            return False
+
+    remaining_condition = {
+        key: value
+        for key, value in condition.items()
+        if key not in school_level_requirements
+    }
+    if not remaining_condition:
+        return True
+    condition = remaining_condition
 
     if "skills" in condition:
         skills_val = condition["skills"]   #['python,sql']
