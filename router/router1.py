@@ -13,8 +13,8 @@ router1 = APIRouter()
 
 class ConditionBody(BaseModel):
     age: Optional[str] = Field(None)
-    major: Optional[List[str]] = Field(None)
-    skills: Optional[List[str]] = Field(None)
+    major: Optional[str] = Field(None)
+    skills: Optional[str] = Field(None)
     degree: Optional[str] = Field(None)
     bachelor_school_level: Optional[str] = Field(None)
     post_graduate_school_level: Optional[str] = Field(None)

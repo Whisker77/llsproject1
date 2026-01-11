@@ -1,5 +1,5 @@
 ##人才的分页查询模块
-from fastapi import APIRouter,HTTPException
+from fastapi import APIRouter,HTTPException,Depends
 
 router3 = APIRouter()
 
@@ -35,7 +35,7 @@ COMPUTER_MAJOR_MAPPING = {   #这里做一个专业关联映射，前端设定�
 }
 
 @router3.get('/talent_list',summary='满足条件的人才分页查询')
-async def talent_list(condition:TalentCondition):
+async def talent_list(condition:TalentCondition=Depends()): #依赖注入使得get方法能用请求体参数
     where = []
     params = []
     conn = pymysql.connect(**db_config)
@@ -45,15 +45,15 @@ async def talent_list(condition:TalentCondition):
             where.append('candidate_name like %s')
             params.append(f'%{condition.name}%')
         if condition.major:
-            related_majors = COMPUTER_MAJOR_MAPPING.get(condition.major, [condition.major]) #['计算机',"软件工程"]
-            # 构造OR条件
-            major_conditions = ['major like %s' for _ in related_majors] #['major like %s','major like %s']
-            where.append(f'({' or '.join(major_conditions)})')     #'(major like %s or major like %s)'
-            # 拼接%并添加参数
-            for major in related_majors:
-                params.append(f'%{major}%')
+            related_majors = COMPUTER_MAJOR_MAPPING.get(condition.major, [condition.major])
+            # 加非空判断：避免生成空括号
+            if related_majors:
+                major_conditions = ['major like %s' for _ in related_majors]
+                where.append(f'({" or ".join(major_conditions)})')
+                for major in related_majors:
+                    params.append(f'%{major}%')
         if condition.school:
-            where.append('(bachelor_school like %s or postgraduate_school like %s)')
+            where.append('(bachelor_school like %s or graduate_school like %s)')
             params.append(f'%{condition.school}%')
             params.append(f'%{condition.school}%')
         if condition.select_day:
