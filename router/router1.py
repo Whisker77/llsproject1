@@ -18,7 +18,7 @@ class ConditionBody(BaseModel):
     degree: Optional[str] = Field(None)
     bachelor_school_level: Optional[str] = Field(None)
     post_graduate_school_level: Optional[str] = Field(None)
-    is_engineering_degree: Optional[bool] = Field(None)
+    is_engineering_degree: Optional[str] = Field(None)
     status: Optional[int] = 1
 
 
@@ -79,7 +79,7 @@ def _format_condition_summary(condition: dict) -> str:
 
     is_engineering_degree = condition.get("is_engineering_degree")
     if is_engineering_degree is not None:
-        parts.append(f"是否工科:{'是' if is_engineering_degree else '否'}")
+        parts.append(f"是否工科:{is_engineering_degree}")
 
     return "；".join(parts) if parts else "无筛选条件" #"学历:硕士;是否工科:否"
 
@@ -264,13 +264,13 @@ async def list_filter_condition(
     statuses: str | None = Query(None, description="表字段status多状态：如 0,1 或 0 1"),
 
     # ======= condition_json 内的筛选条件（多条件 AND） =======
-    age: str | None = Query(None, description="condition_json.age （如 >40 ）"),
-    majors: str | None = Query(None, description="condition_json.major 包含：如 计算机,软件工程"),
-    skills: str | None = Query(None, description="condition_json.skills 包含：如 Python,FastAPI"),
-    degree: str | None = Query(None, description="condition_json.degree 如：本科/硕士"),
-    bachelor_school_level: int | None = Query(None, description="condition_json.bachelor_school_level "),
-    post_graduate_school_level: int | None = Query(None, description="condition_json.post_graduate_school_level "),
-    is_engineering_degree: bool | None = Query(None, description="condition_json.is_engineering_degree  true/false"),
+    age: str | None = Query(None, description="(如 >40)"),
+    majors: str | None = Query(None, description="包含：如 计算机,软件工程"),
+    skills: str | None = Query(None, description="包含：如 Python,FastAPI"),
+    degree: str | None = Query(None, description="如：本科/硕士"),
+    bachelor_school_level: int | None = Query(None, description="985,211?"),
+    post_graduate_school_level: int | None = Query(None, description="985,211?"),
+    is_engineering_degree: str | None = Query(None, description="是/否"),
 ):
     conn = _get_connection()
     cursor = conn.cursor()
@@ -299,9 +299,9 @@ async def list_filter_condition(
                 or_parts = []
                 for m in major_list:
                     or_parts.append(
-                        "JSON_CONTAINS(condition_json, JSON_QUOTE(%s), '$.major')"
+                        "JSON_UNQUOTE(JSON_EXTRACT(condition_json, '$.major')) like %s"
                     ) #JSON_CONTAINS(condition_json, JSON_QUOTE('计算机'), '$.major')  condition_json里的major数据，是不是 “计算机”。
-                    params.append(m)    #or_parts = ["JSON_CONTAINS(condition_json, JSON_QUOTE(%s), '$.major')",
+                    params.append(f'%{m}%')    #or_parts = ["JSON_CONTAINS(condition_json, JSON_QUOTE(%s), '$.major')",
                                                       # "JSON_CONTAINS(condition_json, JSON_QUOTE(%s), '$.major')"]
                 where.append(f"{" OR ".join(or_parts)}")
 
@@ -341,11 +341,10 @@ async def list_filter_condition(
             """)
             params.append(f"%{post_graduate_school_level}%")
 
-        # is_engineering_degree：布尔精确匹配
+        # is_engineering_degree：
         if is_engineering_degree is not None:
-            # MySQL JSON true/false 取出来后，用 1/0 比较最稳
-            where.append("CAST(JSON_UNQUOTE(JSON_EXTRACT(condition_json, '$.is_engineering_degree')) AS UNSIGNED) = %s")
-            params.append(1 if is_engineering_degree else 0)
+            where.append("JSON_UNQUOTE(JSON_EXTRACT(condition_json, '$.is_engineering_degree')) like %s")
+            params.append(f'%{is_engineering_degree}%')
 
         where_sql = " AND ".join(where)
 

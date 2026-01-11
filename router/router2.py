@@ -110,7 +110,7 @@ def extract_pdf_content_and_avatar(pdf_bytes: bytes):
                                 candidate_avatars.append({
                                     "bytes": img_bytes,
                                     "ext": img_ext
-                                })   #candidate_avatars=[{'bytes':123214,''ext':'png'},
+                                })   #candidate-avatars=[{'bytes':123214,''ext':'png'},
                 except Exception as e:
                     print(f"图片提取失败: {e}")
                     continue
@@ -137,7 +137,7 @@ def llm_process_resume(resume_text: str) -> dict:
    - 本科毕业院校
    - 本科毕业学校水平，国内高校用985211判断，国外高校用qs排名
    - 研究生毕业院校
-   - 研究生毕业院校水平，国内高校用985211判断，国外高校用qs排名
+   - 研究生毕业学校水平，国内高校用985211判断，国外高校用qs排名
    - 是否为理工科学生
    
 简历文本：
@@ -190,9 +190,11 @@ def llm_process_resume(resume_text: str) -> dict:
                 if key in resume_info:
                     resume_info[key] = val
 
-        # 转换为布尔值（适配数据库）
-        resume_info["是否工科"] = True if resume_info["是否工科"] == "是" else False
-
+        if resume_info["技能"] != "未知":
+            skill_list = [s.strip() for s in resume_info["技能"].split(",") if s.strip()]
+            resume_info["技能"] = skill_list  # 直接存数组，不是JSON字符串
+        else:
+            resume_info["技能"] = []
         return resume_info
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"大模型处理失败: {str(e)}")
@@ -230,6 +232,17 @@ def fetch_filter_condition(filter_condition_id: int) -> dict:
 def llm_judge_resume_match(resume_info: dict, condition: dict) -> bool:
     if not condition:
         return True
+
+    if "skills" in condition:
+        skills_val = condition["skills"]   #['python,sql']
+        # 步骤1：先把skills转成字符串（不管是数组还是字符串）
+        if isinstance(skills_val, list):
+            skills_str = skills_val[0]  # 数组转字符串，比如["python,sql"]→"python,sql"
+        else:
+            skills_str = skills_val  # 本身是字符串
+        # 步骤2：拆分字符串为独立技能列表
+        condition["skills"] = [s.strip() for s in skills_str.split(",") if s.strip()]
+
     prompt = f"""
 你是人才筛选助手，请根据筛选条件判断候选人是否满足条件，仅返回"是"或"否"。
 
@@ -246,7 +259,10 @@ def llm_judge_resume_match(resume_info: dict, condition: dict) -> bool:
 4. 对于skills，要求候选人具备的技能中包含筛选条件中要求的所有技能。
 5. 如果筛选条件要求学历为本科，那么候选人硕士或博士也是可以的。
 6. 你自己判别候选人的学校水平是否符合筛选条件中对毕业院校水平的要求。比如筛选条件要求本科毕业院校是211，候选人是武汉大学本科，武大是211，符合。
-7. 筛选条件年龄这个条件写的是'<30',候选人的年龄需要30岁。
+7. 筛选条件年龄这个条件写的是'<30',候选人的年龄需要小于30岁。
+8. 候选人专业是计算机相关的话，默认这个候选人的技能包含python。
+9. 如果筛选条件的专业方面是要求候选人专业是计算机相关，但若候选人985毕业就不要求是计算机专业的，你应该灵活判断，
+   比如，如果候选人是985学校的非计算机专业，同样是满足筛选条件。
 """
     try:
         response = LLM_CLIENT.chat.completions.create(
@@ -254,7 +270,7 @@ def llm_judge_resume_match(resume_info: dict, condition: dict) -> bool:
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
-        content = response.choices[0].message.content.strip()
+        content = response.choices[0].message.content.strip() #content = '是' 或者 '否'
         return content.startswith("是")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"大模型筛选失败: {str(e)}")
@@ -298,7 +314,7 @@ async def process_resumes(
             is_match = llm_judge_resume_match(resume_info, condition_json)
             pdf_bucket = "b-bucket" if is_match else "a-bucket"
      
-            avatar_bucket = "candidate_avatar" if is_match else "resume-bucket"
+            avatar_bucket = "candidate-avatar" if is_match else "resume-avatar"
 
             # 5. 上传PDF到MinIO
             pdf_object_name = f"resumes/{file.filename}"
@@ -349,17 +365,17 @@ async def process_resumes(
                         UPDATE resume_info_table 
                         SET major = %s, skill = %s, degree = %s, bachelor_school = %s,
                             bachelor_school_level = %s, graduate_school = %s, graduate_school_level = %s,
-                            is_engineering_degree = %s,resume_minio_path = %s,avatar_minio_path = %s,resume_file_name = %s,
+                            is_engineering_degree = %s,resume_minio_path = %s,avatar_minio_path = %s,resume_file_name = %s
                         WHERE id = %s
                     """
                     update_vals = (
                         resume_info['专业'],
-                        resume_info["技能"],
+                        json.dumps(resume_info["技能"], ensure_ascii=False),
                         resume_info["学历"],
                         resume_info["本科毕业院校"],
                         resume_info['本科学校水平'],
                         resume_info["研究生毕业院校"],
-                        resume_info["研究生毕业院校水平"],
+                        resume_info["研究生毕业学校水平"],
                         resume_info['是否工科'],
                         pdf_minio_path,
                         avatar_minio_path,
@@ -376,14 +392,14 @@ async def process_resumes(
                             bachelor_school,bachelor_school_level,graduate_school,
                             graduate_school_level,is_engineering_degree,resume_minio_path,
                             avatar_minio_path, resume_file_name
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s,%s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s,%s,%s,%s)
                     """
                     insert_vals = (
                         resume_info["姓名"],
                         resume_info["年龄"],
                         resume_info['联系方式'],
                         resume_info["专业"],
-                        resume_info["技能"],
+                        json.dumps(resume_info["技能"], ensure_ascii=False),
                         resume_info["学历"],
                         resume_info["本科毕业院校"],
                         resume_info["本科学校水平"],
@@ -415,40 +431,87 @@ async def process_resumes(
                 try:
                     conn = pymysql.connect(**DB_CONF)
                     cursor = conn.cursor()
-                    insert_sql = """
-                        INSERT INTO talent_info_table (
-                            filter_condition_id, candidate_name, age, contact, major, skill, degree,
-                            bachelor_school, bachelor_school_level, graduate_school, graduate_school_level,
-                            is_engineering_degree, resume_minio_path, portrait_minio_path, resume_file_name
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """
-                    insert_vals = (
+
+                    # 新增：查询人才表是否存在重复记录
+                    talent_query_sql = """
+                            SELECT id FROM talent_info_table 
+                            WHERE filter_condition_id = %s
+                              AND TRIM(candidate_name) = TRIM(%s)
+                              AND TRIM(bachelor_school) = TRIM(%s)
+                              AND TRIM(major) = TRIM(%s)
+                        """
+                    talent_query_vals = (
                         filter_condition_id,
                         resume_info["姓名"],
-                        resume_info["年龄"],
-                        resume_info["联系方式"],
-                        resume_info["专业"],
-                        resume_info["技能"],
-                        resume_info["学历"],
                         resume_info["本科毕业院校"],
-                        resume_info["本科学校水平"],
-                        resume_info["研究生毕业院校"],
-                        resume_info["研究生毕业学校水平"],
-                        resume_info["是否工科"],
-                        pdf_minio_path,
-                        avatar_minio_path,
-                        file.filename
+                        resume_info["专业"]
                     )
-                    try:
-                        cursor.execute(insert_sql, insert_vals)
-                    except pymysql.MySQLError as insert_error:
-                        if "Unknown column 'filter_condition_id'" in str(insert_error):
-                            insert_sql = insert_sql.replace("filter_condition_id", "filter_condition")
+                    cursor.execute(talent_query_sql, talent_query_vals)
+                    talent_existing_id = cursor.fetchone()
+
+                    if talent_existing_id:
+                        # 重复：执行UPDATE
+                        talent_update_sql = """
+                                UPDATE talent_info_table 
+                                SET age = %s, contact = %s, skill = %s, degree = %s,
+                                    bachelor_school_level = %s, graduate_school = %s, graduate_school_level = %s,
+                                    is_engineering_degree = %s, resume_minio_path = %s, portrait_minio_path = %s,
+                                    resume_file_name = %s, select_day = CURRENT_DATE
+                                WHERE id = %s
+                            """
+                        talent_update_vals = (
+                            resume_info["年龄"],
+                            resume_info["联系方式"],
+                            json.dumps(resume_info["技能"], ensure_ascii=False),
+                            resume_info["学历"],
+                            resume_info["本科学校水平"],
+                            resume_info["研究生毕业院校"],
+                            resume_info["研究生毕业学校水平"],
+                            resume_info["是否工科"],
+                            pdf_minio_path,
+                            avatar_minio_path,
+                            file.filename,
+                            talent_existing_id[0]
+                        )
+                        cursor.execute(talent_update_sql, talent_update_vals)
+                        talent_status = "已覆盖（ID：{}）".format(talent_existing_id[0])
+                    else:
+                        conn = pymysql.connect(**DB_CONF)
+                        cursor = conn.cursor()
+                        insert_sql = """
+                            INSERT INTO talent_info_table (
+                                filter_condition_id, candidate_name, age, contact, major, skill, degree,
+                                bachelor_school, bachelor_school_level, graduate_school, graduate_school_level,
+                                is_engineering_degree, resume_minio_path, portrait_minio_path, resume_file_name
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s)
+                        """
+                        insert_vals = (
+                            filter_condition_id,
+                            resume_info["姓名"],
+                            resume_info["年龄"],
+                            resume_info["联系方式"],
+                            resume_info["专业"],
+                            json.dumps(resume_info["技能"], ensure_ascii=False),
+                            resume_info["学历"],
+                            resume_info["本科毕业院校"],
+                            resume_info["本科学校水平"],
+                            resume_info["研究生毕业院校"],
+                            resume_info["研究生毕业学校水平"],
+                            resume_info["是否工科"],
+                            pdf_minio_path,
+                            avatar_minio_path,
+                            file.filename
+                        )
+                        try:
                             cursor.execute(insert_sql, insert_vals)
-                        else:
-                            raise
-                    conn.commit()
-                    talent_status = "已存入（新ID：{}）".format(cursor.lastrowid)
+                        except pymysql.MySQLError as insert_error:
+                            if "Unknown column 'filter_condition_id'" in str(insert_error):
+                                insert_sql = insert_sql.replace("filter_condition_id", "filter_condition")
+                                cursor.execute(insert_sql, insert_vals)
+                            else:
+                                raise
+                        conn.commit()
+                        talent_status = "已存入（新ID：{}）".format(cursor.lastrowid)
                 except Exception as e:
                     if conn:
                         conn.rollback()
@@ -467,6 +530,7 @@ async def process_resumes(
                     "提取的核心信息": {
                         "姓名": resume_info["姓名"],
                         "专业": resume_info["专业"],
+                        '年龄': resume_info['年龄'],
                         "学历": resume_info["学历"],
                         "本科毕业院校": resume_info["本科毕业院校"],
                         "本科学校水平": resume_info["本科学校水平"],
@@ -489,6 +553,7 @@ async def process_resumes(
                 "人才库入库状态": talent_status,
                 "提取的核心信息": {
                     "姓名": resume_info["姓名"],
+                    '年龄': resume_info['年龄'],
                     "技能": resume_info["技能"],
                     "联系方式":resume_info['联系方式'],
                     "专业": resume_info["专业"],

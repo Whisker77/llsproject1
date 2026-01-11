@@ -42,7 +42,7 @@ ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 comment = '筛选条件表';
         bachelor_school_level varchar(50) default null comment '本科学校水平，国内指985211，国外指qs排名', -- 国内学校写成985,211,海外就写12
         graduate_school varchar(50) default null comment '研究生毕业学校', 
         graduate_school_level varchar(50) default null comment '研究生毕业学校水平，国内指985211，国外指qs排名',
-        is_engineering_degree bool not null comment '是否为工科专业',
+        is_engineering_degree varchar(50) not null comment '是否为工科专业',
         resume_minio_path text default null comment '简历保存路径',
         avatar_minio_path text default null comment '头像图片保存路径',
         resume_file_name varchar(100) comment '简历原文件名',
@@ -64,7 +64,7 @@ ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 comment = '筛选条件表';
             bachelor_school_level varchar(50) default null comment '本科学校水平，国内指985211，国外指qs排名', -- 国内学校写成mainland,985,211,海外就写oversea,12
             graduate_school varchar(50) default null comment '研究生毕业学校', 
             graduate_school_level varchar(50) default null comment '研究生毕业学校水平，国内指985211，国外指qs排名',
-            is_engineering_degree bool not null comment '是否为工科专业',
+            is_engineering_degree varchar(50) not null comment '是否为工科专业',
             resume_minio_path text default null comment '简历保存路径',
             portrait_minio_path text default null comment '头像图片保存路径',
             resume_file_name varchar(100) comment '简历原文件名',
