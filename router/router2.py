@@ -337,6 +337,7 @@ def llm_judge_resume_match(resume_info: dict, condition: dict) -> bool:
 8. 候选人专业是计算机相关的话，默认这个候选人的技能包含python。
 9. 如果筛选条件的专业方面是要求候选人专业是计算机相关，但若候选人985毕业就不要求是计算机专业的，你应该灵活判断，
    比如，如果候选人是985学校的非计算机专业，同样是满足筛选条件。
+10.如果提取出候选人的学校水平是985211，意思是这个学校是985，也是211.
 """
     try:
         response = LLM_CLIENT.chat.completions.create(

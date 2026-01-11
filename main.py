@@ -7,9 +7,7 @@ from router.router3 import router3
 app = FastAPI()
 
 app.include_router(router1,tags=['筛选条件表操作接口'])
-app.include_router(router2,tags=['简历文件基础信息上传与筛选入库接'
-                                 
-                                 '口'])
+app.include_router(router2,tags=['简历文件基础信息上传与筛选入库接口'])
 app.include_router(router3,tags=['满足条件的人才查询接口'])
 
 if __name__ == '__main__':
