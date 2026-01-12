@@ -259,6 +259,7 @@ def llm_process_resume(resume_text: str) -> dict:
             resume_info["技能"] = skill_list  # 直接存数组，不是JSON字符串
         else:
             resume_info["技能"] = []
+        # resume_info["年龄"] = int(resume_info["年龄"]) if resume_info["年龄"] not in ["未知", "无", ""] else 0
         resume_info["本科学校水平"] = _infer_school_level(
             resume_info.get("本科毕业院校"),
             resume_info.get("本科学校水平"),
@@ -380,12 +381,12 @@ def llm_judge_resume_match(resume_info: dict, condition: dict) -> bool:
 4. 对于skills，要求候选人具备的技能中包含筛选条件中要求的所有技能。
 5. 如果筛选条件要求学历为本科，那么候选人硕士或博士也是可以的。
 6. 你自己判别候选人的学校水平是否符合筛选条件中对毕业院校水平的要求。比如筛选条件要求本科毕业院校是211，候选人是武汉大学本科，武大是211，符合。
-7. 筛选条件年龄这个条件写的是'<30',候选人的年龄需要小于30岁。
+7. 筛选条件年龄这个条件写的是'<30',候选人的年龄需要小于30岁。如果筛选条件年龄这个条件写的是'小于40',只要候选人的年龄小于40岁就可以。
 8. 候选人专业是计算机相关的话，默认这个候选人的技能包含python。
 9. 如果筛选条件的专业方面是要求候选人专业是计算机相关，但若候选人985毕业就不要求是计算机专业的，你应该灵活判断，
    比如，如果候选人是985学校的非计算机专业，同样是满足筛选条件。
 10.如果提取出候选人的学校水平是985211，意思是这个学校是985，也是211，筛选条件要求学校水平为211，则满足条件，要求为985，也满足条件。
-11.华中科技大学是985和211，中山大学也是985和211，如果筛选条件要求学校是211，这两个学校都是可以的。浙江大学和南京大学同理，既是985也是211.
+11.华中科技大学是985和211，中山大学也是985和211，如果筛选条件要求学校是211，这两个学校都是可以的。浙江大学和南京大学同理，既是985也是211.如果学校是985，那么这个学校必然是211.
 给你详细的985高校名单：
 _KNOWN_985_SCHOOLS = {
     "北京大学",
@@ -641,8 +642,6 @@ async def process_resumes(
                         cursor.execute(talent_update_sql, talent_update_vals)
                         talent_status = "已覆盖（ID：{}）".format(talent_existing_id[0])
                     else:
-                        conn = pymysql.connect(**DB_CONF)
-                        cursor = conn.cursor()
                         insert_sql = """
                             INSERT INTO talent_info_table (
                                 filter_condition_id, candidate_name, age, contact, major, skill, degree,
