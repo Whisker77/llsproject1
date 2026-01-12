@@ -8,7 +8,7 @@ from typing import Optional
 from datetime import date
 from config import db_config
 import pymysql
-
+from fastapi import Depends,Query
 
 
 
@@ -35,7 +35,9 @@ COMPUTER_MAJOR_MAPPING = {   #这里做一个专业关联映射，前端设定�
 }
 
 @router3.get('/talent_list',summary='满足条件的人才分页查询')
-async def talent_list(condition:TalentCondition=Depends()): #依赖注入使得get方法能用请求体参数
+async def talent_list(condition:TalentCondition=Depends(),
+    page: int = Query(1, ge=1),
+    page_size:int = Query(10, ge=1, le=100)): #依赖注入使得get方法能用请求体参数
     where = []
     params = []
     conn = pymysql.connect(**db_config)
@@ -61,7 +63,10 @@ async def talent_list(condition:TalentCondition=Depends()): #依赖注入使得g
             params.append(condition.select_day)
         if where:
             where_sql = ' AND '.join(where)
-            complete_sql = f'select * from talent_info_table where {where_sql}'
+            offset = (page - 1) * page_size
+            complete_sql = f'select * from talent_info_table where {where_sql} LIMIT %s OFFSET %s'
+            params.append(page_size)
+            params.append(offset)
             cursor.execute(complete_sql, params)
             data = cursor.fetchall()
             if len(data) >= 1:
