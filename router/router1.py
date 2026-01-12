@@ -19,7 +19,7 @@ class ConditionBody(BaseModel):
     bachelor_school_level: Optional[str] = Field(None)
     graduate_school_level: Optional[str] = Field(None)
     is_engineering_degree: Optional[str] = Field(None)
-    status: Optional[int] = 1
+    status: Optional[int] = Field(1)
 
 
 
@@ -181,29 +181,60 @@ async def update_filter_condition(req: UpdateFilterConditionReq):
 
     cursor = conn.cursor()
     try:
-        update_fields = []  #['name=%s','condition_json={'major':..,'skill':..}','status:%s']
-        params = []
-
         if req.condition is not None:
-            condition_dict = req.condition.model_dump(exclude_none=True)
-            condition_dict = _clean_condition_dict(condition_dict)  # 新增这行
-            condition_json_str = _dump_condition_json(condition_dict)
-            update_fields.append("condition_json=%s")
+            incoming_condition = req.condition.model_dump(exclude_none=True)
+            incoming_condition = _clean_condition_dict(incoming_condition)
+        else:
+            incoming_condition = {}
 
-            params.append(condition_json_str)
-
-
-        if not update_fields:
+        if not incoming_condition:
             raise HTTPException(status_code=400, detail="没有需要更新的字段")
 
-        sql = f"""
-        UPDATE filter_condition
-        SET {",".join(update_fields)}
-        WHERE id=%s AND is_deleted=0
-        """
-        params.append(req.id)
+        cursor.execute(
+            """
+            SELECT condition_json
+            FROM filter_condition
+            WHERE id=%s AND is_deleted=0
+            """,
+            (req.id,),
+        )
+        row = cursor.fetchone() #前面定义了cursor的fetch返回字典
+        if not row:
+            raise HTTPException(status_code=404, detail="记录不存在或已删除")
 
-        cursor.execute(sql, params)     #占位符+绑定参数
+        existing_condition = _parse_condition_json(row.get("condition_json"))
+        merged_condition = {**existing_condition, **incoming_condition} #字典
+        if merged_condition.get('status') == 0:
+            cursor.execute(
+                """
+                UPDATE filter_condition
+                SET status=0
+                WHERE id=%s AND is_deleted=0
+                """,
+                (req.id),
+            )  # 占位符+绑定参数      #MySQL 执行UPDATE时，即使WHERE条件匹配不到任何记录，也不会报错，只是 “影响行数为 0”。
+            conn.commit()
+        condition_json_str = _dump_condition_json(merged_condition)
+
+        if merged_condition.get('status') == 1:
+            cursor.execute(
+                """
+                UPDATE filter_condition
+                SET status=1
+                WHERE id=%s AND is_deleted=0
+                """,
+                (req.id),
+            )  # 占位符+绑定参数      #MySQL 执行UPDATE时，即使WHERE条件匹配不到任何记录，也不会报错，只是 “影响行数为 0”。
+            conn.commit()
+
+        cursor.execute(
+            """
+            UPDATE filter_condition
+            SET condition_json=%s
+            WHERE id=%s AND is_deleted=0
+            """,
+            (condition_json_str, req.id),
+        )     #占位符+绑定参数      #MySQL 执行UPDATE时，即使WHERE条件匹配不到任何记录，也不会报错，只是 “影响行数为 0”。
         conn.commit()
 
         if cursor.rowcount == 0:
@@ -217,7 +248,6 @@ async def update_filter_condition(req: UpdateFilterConditionReq):
     finally:
         cursor.close()
         conn.close()
-
 
 
 @router1.delete("/delete_filter_condition", summary="删除筛选条件（逻辑删除）")

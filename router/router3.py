@@ -40,7 +40,7 @@ async def talent_list(condition:TalentCondition=Depends(),
     page_size:int = Query(10, ge=1, le=100)): #依赖注入使得get方法能用请求体参数
     where = []
     params = []
-    conn = pymysql.connect(**db_config)
+    conn = pymysql.connect(**db_config,cursorclass=pymysql.cursors.DictCursor)
     cursor = conn.cursor()
     try:
         if condition.name:
