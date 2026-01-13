@@ -273,7 +273,7 @@ def llm_process_resume(resume_text: str) -> dict:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"大模型处理失败: {str(e)}")
 
-def fetch_filter_condition(filter_condition_id: int) -> list:
+def fetch_filter_condition(filter_condition_id: int) -> tuple:
     conn = None
     cursor = None
     try:
@@ -288,25 +288,26 @@ def fetch_filter_condition(filter_condition_id: int) -> list:
         row = cursor.fetchone()  #row是一个元组，包含每个字段的值
         if not row:
             raise HTTPException(status_code=404, detail="筛选条件不存在或已删除")
+
         condition_json,prompt,status,is_deleted = row
+
         if status != 1:
             raise HTTPException(status_code=400, detail="筛选条件不可用")
         if is_deleted == 1:
             raise HTTPException(status_code =400,detail='筛选条件已被逻辑删除')
         if isinstance(condition_json, str): #如果sql里是json，pymysql读取后是str类型
             try:
-                condition_json = json.loads(condition_json) #将str转为dict
+                condition_json = json.loads(condition_json) #将json的str转为dict
             except json.JSONDecodeError:
                 condition_json = {}
-        condition_json = [condition_json,{'prompt':prompt}]
-        return condition_json or [] #语法是如果condition_json为None，就返回空列表
+        return condition_json,prompt or ()#语法是如果condition_json为None，就返回空列表
     finally:
         if cursor:
             cursor.close()
         if conn:
             conn.close()
 
-def llm_judge_resume_match(resume_info: dict, condition: list) -> bool:
+def llm_judge_resume_match(resume_info: dict, condition: dict,prompt:str) -> bool:
     if not condition:
         return True
 
@@ -316,11 +317,13 @@ def llm_judge_resume_match(resume_info: dict, condition: list) -> bool:
 筛选条件（JSON，空或null字段表示不限制）：
 {json.dumps(condition, ensure_ascii=False)}
 
+补充说明:{prompt}
+
 候选人信息（JSON）：
 {json.dumps(resume_info, ensure_ascii=False)}
 
 判断规则：
-上面给你的condition筛选条件json已经给你了明确的筛选条件具体内容和判断准则，里面包含了两个字典，一个是设定的筛选条件，另一个是补充说明的提示词。
+上面给你的condition的json和prompt已经给你了明确的筛选条件具体内容和判断准则，包含了一个字典是设定的筛选条件，另一个是补充说明的提示词。
 你根据已给的筛选规则比对同时给到你的候选人信息做条件判断，输出候选人
 是否符合筛选条件的判断。
 """
@@ -345,7 +348,7 @@ async def process_resumes(
     matched_results = []
     failed_files = []
     avatar_success_count = 0
-    condition_json = fetch_filter_condition(filter_condition_id)
+    condition_json,prompt_str = fetch_filter_condition(filter_condition_id)
     for file in files:
         try:
             # 1. 校验文件类型
@@ -371,7 +374,7 @@ async def process_resumes(
             except HTTPException as e:
                 raise ValueError(f"大模型处理失败: {e.detail}") from e
 
-            is_match = llm_judge_resume_match(resume_info, condition_json)
+            is_match = llm_judge_resume_match(resume_info, condition_json,prompt_str)
             pdf_bucket = "b-bucket" if is_match else "a-bucket"
      
             avatar_bucket = "candidate-avatar" if is_match else "resume-avatar"

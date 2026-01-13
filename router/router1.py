@@ -393,7 +393,7 @@ async def list_filter_condition(
         offset = (page - 1) * page_size
         cursor.execute(
             f"""
-            SELECT id, condition_json, status, is_deleted, created_at, updated_at
+            SELECT id, condition_json,prompt,status, is_deleted, created_at, updated_at
             FROM filter_condition
             WHERE {where_sql}
             ORDER BY id DESC
@@ -401,7 +401,7 @@ async def list_filter_condition(
             """,
             params + [page_size, offset],
         )
-        rows = cursor.fetchall()
+        rows = cursor.fetchall() #fetchone()返回一个元组，fetchall()返回一个列表！！！
 
         # 5) 输出统一：condition_json -> dict
         for row in rows:
