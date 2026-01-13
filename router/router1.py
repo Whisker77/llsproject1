@@ -348,10 +348,10 @@ async def list_filter_condition(
                 or_parts = []
                 for sk in skill_list:
                     or_parts.append(
-                        "JSON_CONTAINS(condition_json, JSON_QUOTE(%s), '$.skills')"
+                         "LOWER(JSON_UNQUOTE(condition_json->'$.skills')) LIKE CONCAT('%%', %s, '%%')"
                     )
-                    params.append(sk)
-                where.append(f"{" OR ".join(or_parts)}")
+                    params.append(sk.lower())
+                where.append(f"{" AND ".join(or_parts)}")
 
         # degree：字符串精确匹配
         if degree:
