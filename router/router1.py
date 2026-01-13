@@ -20,6 +20,8 @@ class ConditionBody(BaseModel):
     graduate_school_level: Optional[str] = Field(None)
     is_engineering_degree: Optional[str] = Field(None)
     status: Optional[int] = Field(1)
+    prompt:Optional[str] = Field("""对候选人的每一条信息和筛选条件做比对，年龄，专业，技能，本科学校水平，研究生学校水平，
+是否为工科专业。如果筛选条件要求本科，候选人是硕士或博士同样满足，如果技能要求sql，候选人会mysql，这个是满足的，自己灵活判断，不要死板。""")
 
 
 
@@ -102,7 +104,7 @@ def _clean_condition_dict(condition_dict: dict) -> dict:
     return cleaned_dict
 
 @router1.post('/add_filter_condition',summary='新增筛选条件')
-async def add_filter_condition(req: ConditionBody,prompt:str=Query(...)):
+async def add_filter_condition(req: ConditionBody):
     conn = _get_connection()
     cursor = conn.cursor()
 
@@ -111,7 +113,7 @@ async def add_filter_condition(req: ConditionBody,prompt:str=Query(...)):
         condition_dict = req.model_dump(exclude_none=True)        #model_dump转为字典
         condition_dict = _clean_condition_dict(condition_dict)  # 再过滤"string"/空字符串等
         condition_json_str = _dump_condition_json(condition_dict) #转为json格式，去掉none的条件
-
+        prompt = req.prompt
         # 2) 插入
         sql = """
         INSERT INTO filter_condition (condition_json, prompt,is_deleted)
@@ -173,8 +175,7 @@ async def list_filter_condition_summary():
 
 class UpdateFilterConditionReq(BaseModel):
     id: int = Field(..., gt=0)
-    condition: Optional[ConditionBody] = None
-    prompt:Optional[str] = Field(None,description='提示词')
+    condition: Optional[ConditionBody]=None
     is_deleted:Optional[int] = Field(None, decription='在这个接口也可以做逻辑删除')
 
 @router1.put("/update_filter_condition", summary="更新筛选条件")
@@ -184,12 +185,12 @@ async def update_filter_condition(req: UpdateFilterConditionReq):
     cursor = conn.cursor()
     try:
         if req.condition is not None:
-            incoming_condition = req.condition.model_dump(exclude_none=True)
+            incoming_condition = req.condition.model_dump(exclude_none=True) #转换为字典
             incoming_condition = _clean_condition_dict(incoming_condition)
         else:
             incoming_condition = {}
 
-        if not incoming_condition and not req.prompt:
+        if not incoming_condition and not req.is_deleted:
             raise HTTPException(status_code=400, detail="没有需要更新的字段")
 
         cursor.execute(
@@ -234,14 +235,14 @@ async def update_filter_condition(req: UpdateFilterConditionReq):
             SET condition_json=%s
             WHERE id=%s AND is_deleted=0
             """,
-            (condition_json_str, req.id),
-        )     #占位符+绑定参数      #MySQL 执行UPDATE时，即使WHERE条件匹配不到任何记录，也不会报错，只是 “影响行数为 0”。
+            (condition_json_str, req.id))     #占位符+绑定参数      #MySQL 执行UPDATE时，即使WHERE条件匹配不到任何记录，也不会报错，只是 “影响行数为 0”。
         conn.commit()
-        if req.prompt:
-            cursor.execute('UPDATE filter_condition SET prompt=%s WHERE id=%s AND is_deleted=0',(req.prompt,req.id))
-            conn.commit()
+        if req.condition:
+            if req.condition.prompt:
+                cursor.execute('UPDATE filter_condition SET prompt=%s WHERE id=%s AND is_deleted=0',(req.condition.prompt,req.id))
+                conn.commit()
         if req.is_deleted == 1:
-            cursor.execute('update filter_condition set is_deleted=1 where id = {req.id} and is_deleted=0')
+            cursor.execute('update filter_condition set is_deleted=1 where id = %s and is_deleted=0',req.id)
             conn.commit()
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="记录不存在或已删除")
