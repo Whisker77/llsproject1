@@ -18,8 +18,7 @@ try:
     create_table_sql1 = '''
 CREATE TABLE filter_condition (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  condition_json JSON NOT NULL COMMENT '筛选条件内容',
-  prompt text not null comment '大模型提示词',
+  prompt text not null comment '大模型提示词,筛选条件',
   is_deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除 0-正常 1-删除',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
