@@ -138,7 +138,7 @@ async def list_filter_condition_summary():
     cursor = conn.cursor()
     try:
         sql = """
-        SELECT id, condition_json, status,is_deleted
+        SELECT id, condition_json, prompt,status,is_deleted
         FROM filter_condition
         ORDER BY id DESC
         """
@@ -155,6 +155,7 @@ async def list_filter_condition_summary():
                     'is_deleted': row["is_deleted"],
                     "summary": _format_condition_summary(condition_json), #这个是返回字符串
                     "condition": condition_json,
+                    'prompt':row['prompt']
                 }
             )
 
@@ -188,7 +189,7 @@ async def update_filter_condition(req: UpdateFilterConditionReq):
         else:
             incoming_condition = {}
 
-        if not incoming_condition:
+        if not incoming_condition and not req.prompt:
             raise HTTPException(status_code=400, detail="没有需要更新的字段")
 
         cursor.execute(

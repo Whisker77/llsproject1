@@ -320,7 +320,8 @@ def llm_judge_resume_match(resume_info: dict, condition: list) -> bool:
 {json.dumps(resume_info, ensure_ascii=False)}
 
 判断规则：
-上面给你的condition筛选条件json已经给你了明确的筛选条件具体内容和判断准则，你根据已给的筛选规则比对同时给到你的候选人信息做条件判断，输出候选人
+上面给你的condition筛选条件json已经给你了明确的筛选条件具体内容和判断准则，里面包含了两个字典，一个是设定的筛选条件，另一个是补充说明的提示词。
+你根据已给的筛选规则比对同时给到你的候选人信息做条件判断，输出候选人
 是否符合筛选条件的判断。
 """
     try:
