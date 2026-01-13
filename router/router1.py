@@ -102,7 +102,7 @@ def _clean_condition_dict(condition_dict: dict) -> dict:
     return cleaned_dict
 
 @router1.post('/add_filter_condition',summary='新增筛选条件')
-async def add_filter_condition(req: ConditionBody):
+async def add_filter_condition(req: ConditionBody,prompt:str=Query(...)):
     conn = _get_connection()
     cursor = conn.cursor()
 
@@ -114,10 +114,10 @@ async def add_filter_condition(req: ConditionBody):
 
         # 2) 插入
         sql = """
-        INSERT INTO filter_condition (condition_json, is_deleted)
-        VALUES (%s, 0)
+        INSERT INTO filter_condition (condition_json, prompt,is_deleted)
+        VALUES (%s,%s,0)
         """
-        cursor.execute(sql, condition_json_str) #("""INSERT INTO filter_condition (condition_json, is_deleted)VALUES (%s, 0)""",condition_json_str)
+        cursor.execute(sql, (condition_json_str,prompt)) #("""INSERT INTO filter_condition (condition_json,prompt,is_deleted)VALUES (%s, 0)""",condition_json_str)
         conn.commit()
 
         new_filter_condition_id = cursor.lastrowid
@@ -173,7 +173,8 @@ async def list_filter_condition_summary():
 class UpdateFilterConditionReq(BaseModel):
     id: int = Field(..., gt=0)
     condition: Optional[ConditionBody] = None
-
+    prompt:Optional[str] = Field(None,description='提示词')
+    is_deleted:Optional[int] = Field(None, decription='在这个接口也可以做逻辑删除')
 
 @router1.put("/update_filter_condition", summary="更新筛选条件")
 async def update_filter_condition(req: UpdateFilterConditionReq):
@@ -214,7 +215,6 @@ async def update_filter_condition(req: UpdateFilterConditionReq):
                 (req.id),
             )  # 占位符+绑定参数      #MySQL 执行UPDATE时，即使WHERE条件匹配不到任何记录，也不会报错，只是 “影响行数为 0”。
             conn.commit()
-        condition_json_str = _dump_condition_json(merged_condition)
 
         if merged_condition.get('status') == 1:
             cursor.execute(
@@ -226,7 +226,7 @@ async def update_filter_condition(req: UpdateFilterConditionReq):
                 (req.id),
             )  # 占位符+绑定参数      #MySQL 执行UPDATE时，即使WHERE条件匹配不到任何记录，也不会报错，只是 “影响行数为 0”。
             conn.commit()
-
+        condition_json_str = _dump_condition_json(merged_condition)
         cursor.execute(
             """
             UPDATE filter_condition
@@ -236,7 +236,12 @@ async def update_filter_condition(req: UpdateFilterConditionReq):
             (condition_json_str, req.id),
         )     #占位符+绑定参数      #MySQL 执行UPDATE时，即使WHERE条件匹配不到任何记录，也不会报错，只是 “影响行数为 0”。
         conn.commit()
-
+        if req.prompt:
+            cursor.execute('UPDATE filter_condition SET prompt=%s WHERE id=%s AND is_deleted=0',(req.prompt,req.id))
+            conn.commit()
+        if req.is_deleted == 1:
+            cursor.execute('update filter_condition set is_deleted=1 where id = {req.id} and is_deleted=0')
+            conn.commit()
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="记录不存在或已删除")
 

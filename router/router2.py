@@ -209,6 +209,7 @@ def llm_process_resume(resume_text: str) -> dict:
 
 返回格式（每行一个字段，顺序不变）：
 姓名:xxx
+
 年龄:xxx
 联系方式:xxx
 专业:xxx 本科和硕士博士专业不一样的话用逗号连接
@@ -272,98 +273,42 @@ def llm_process_resume(resume_text: str) -> dict:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"大模型处理失败: {str(e)}")
 
-def fetch_filter_condition(filter_condition_id: int) -> dict:
+def fetch_filter_condition(filter_condition_id: int) -> list:
     conn = None
     cursor = None
     try:
         conn = pymysql.connect(**DB_CONF)
         cursor = conn.cursor()
         sql = """
-            SELECT condition_json, status,is_deleted
+            SELECT condition_json,prompt,status,is_deleted
             FROM filter_condition
             WHERE id=%s 
         """
         cursor.execute(sql, (filter_condition_id,))
-        row = cursor.fetchone()
+        row = cursor.fetchone()  #row是一个元组，包含每个字段的值
         if not row:
             raise HTTPException(status_code=404, detail="筛选条件不存在或已删除")
-        condition_json, status,is_deleted = row
+        condition_json,prompt,status,is_deleted = row
         if status != 1:
             raise HTTPException(status_code=400, detail="筛选条件不可用")
         if is_deleted == 1:
             raise HTTPException(status_code =400,detail='筛选条件已被逻辑删除')
-        if isinstance(condition_json, str):
+        if isinstance(condition_json, str): #如果sql里是json，pymysql读取后是str类型
             try:
-                condition_json = json.loads(condition_json)
+                condition_json = json.loads(condition_json) #将str转为dict
             except json.JSONDecodeError:
                 condition_json = {}
-        return condition_json or {}
+        condition_json = [condition_json,{'prompt':prompt}]
+        return condition_json or [] #语法是如果condition_json为None，就返回空列表
     finally:
         if cursor:
             cursor.close()
         if conn:
             conn.close()
 
-def llm_judge_resume_match(resume_info: dict, condition: dict) -> bool:
+def llm_judge_resume_match(resume_info: dict, condition: list) -> bool:
     if not condition:
         return True
-    if condition.get('bachelor_school_level') or condition.get('graduate_school_level'):
-        def _level_tokens(level_value: str) -> set[str]:
-            if not level_value:
-                return set()
-            normalized = str(level_value).strip() #985211
-            if normalized in {"无", "未知", "null", "None"}:
-                return set()
-            tokens = set()
-            if "985" in normalized:
-                tokens.add("985")
-            if "211" in normalized:
-                tokens.add("211")
-            return tokens   # 985211 → (985,211)
-
-        def _school_level_ok(cond_value: str, resume_value: str) -> bool:
-            cond_tokens = _level_tokens(cond_value)
-            if not cond_tokens:
-                return True
-            resume_tokens = _level_tokens(resume_value)
-            if not resume_tokens:
-                return False
-            return cond_tokens.issubset(resume_tokens)
-
-        school_level_requirements = {
-            "bachelor_school_level": (
-                condition.get("bachelor_school_level"),
-                resume_info.get("本科学校水平"),
-            ),
-            "graduate_school_level": (
-                condition.get("graduate_school_level"),
-                resume_info.get("研究生毕业学校水平"),
-            ),
-        }
-        for key, (cond_val, resume_val) in school_level_requirements.items():
-            if cond_val is None or cond_val == "":
-                continue
-            if not _school_level_ok(cond_val, resume_val):
-                return False
-
-        remaining_condition = {
-            key: value
-            for key, value in condition.items()
-            if key not in school_level_requirements
-        }
-        if not remaining_condition:
-            return True
-        condition = remaining_condition
-
-    if "skills" in condition:
-        skills_val = condition["skills"]   #['python,sql']
-        # 步骤1：先把skills转成字符串（不管是数组还是字符串）
-        if isinstance(skills_val, list):
-            skills_str = skills_val[0]  # 数组转字符串，比如["python,sql"]→"python,sql"
-        else:
-            skills_str = skills_val  # 本身是字符串
-        # 步骤2：拆分字符串为独立技能列表
-        condition["skills"] = [s.strip() for s in skills_str.split(",") if s.strip()]
 
     prompt = f"""
 你是人才筛选助手，请根据筛选条件判断候选人是否满足条件，仅返回"是"或"否"。
@@ -375,60 +320,8 @@ def llm_judge_resume_match(resume_info: dict, condition: dict) -> bool:
 {json.dumps(resume_info, ensure_ascii=False)}
 
 判断规则：
-1. 条件字段为空或null则忽略。
-2. 候选人字段为"未知"或"无"视为不满足该条件。
-3. 对于major，只要候选人的专业是属于筛选条件中要求专业的大类就符合，比如说，筛选条件要求专业是计算机，候选人是计算机相关比如网络安全，一样算符合。
-4. 对于skills，要求候选人具备的技能中包含筛选条件中要求的所有技能。
-5. 如果筛选条件要求学历为本科，那么候选人硕士或博士也是可以的。
-6. 你自己判别候选人的学校水平是否符合筛选条件中对毕业院校水平的要求。比如筛选条件要求本科毕业院校是211，候选人是武汉大学本科，武大是211，符合。
-7. 筛选条件年龄这个条件写的是'<30',候选人的年龄需要小于30岁。如果筛选条件年龄这个条件写的是'小于40',只要候选人的年龄小于40岁就可以。
-8. 候选人专业是计算机相关的话，默认这个候选人的技能包含python。
-9. 如果筛选条件的专业方面是要求候选人专业是计算机相关，但若候选人985毕业就不要求是计算机专业的，你应该灵活判断，
-   比如，如果候选人是985学校的非计算机专业，同样是满足筛选条件。
-10.如果提取出候选人的学校水平是985211，意思是这个学校是985，也是211，筛选条件要求学校水平为211，则满足条件，要求为985，也满足条件。
-11.华中科技大学是985和211，中山大学也是985和211，如果筛选条件要求学校是211，这两个学校都是可以的。浙江大学和南京大学同理，既是985也是211.如果学校是985，那么这个学校必然是211.
-给你详细的985高校名单：
-_KNOWN_985_SCHOOLS = {
-    "北京大学",
-    "清华大学",
-    "复旦大学",
-    "上海交通大学",
-    "南京大学",
-    "浙江大学",
-    "中国科学技术大学",
-    "哈尔滨工业大学",
-    "西安交通大学",
-    "北京航空航天大学",
-    "北京理工大学",
-    "同济大学",
-    "东南大学",
-    "天津大学",
-    "南开大学",
-    "中山大学",
-    "华中科技大学",
-    "武汉大学",
-    "厦门大学",
-    "山东大学",
-    "吉林大学",
-    "四川大学",
-    "重庆大学",
-    "华南理工大学",
-    "中国人民大学",
-    "北京师范大学",
-    "中国农业大学",
-    "西北工业大学",
-    "大连理工大学",
-    "中南大学",
-    "湖南大学",
-    "中国海洋大学",
-    "兰州大学",
-    "电子科技大学",
-    "西北农林科技大学",
-    "东北大学",
-    "中国地质大学(武汉)",
-    "中国地质大学(北京)",
-    "中央民族大学",
-}
+上面给你的condition筛选条件json已经给你了明确的筛选条件具体内容和判断准则，你根据已给的筛选规则比对同时给到你的候选人信息做条件判断，输出候选人
+是否符合筛选条件的判断。
 """
     try:
         response = LLM_CLIENT.chat.completions.create(
