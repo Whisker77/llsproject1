@@ -186,45 +186,13 @@ def _infer_school_level(school_name: str, current_level: str) -> str:
     return level
 
 
-def llm_process_resume(resume_text: str) -> dict:
+def llm_process_resume(resume_text: str,prompt:str) -> dict:
     """大模型筛提取简历信息"""
-    prompt = f"""
-请严格按以下要求处理简历文本，仅返回指定格式内容，不要额外文字：
-
-信息提取（无该信息填'无'）：
-   - 姓名
-   - 年龄
-   - 联系方式
-   - 专业
-   - 技能
-   - 学历
-   - 本科毕业院校
-   - 本科毕业学校水平，国内高校用985211判断，国外高校用qs排名
-   - 研究生毕业院校
-   - 研究生毕业学校水平，国内高校用985211判断，国外高校用qs排名
-   - 是否为理工科学生
-   
-简历文本：
-{resume_text[:1000]}
-
-返回格式（每行一个字段，顺序不变）：
-姓名:xxx
-
-年龄:xxx
-联系方式:xxx
-专业:xxx 本科和硕士博士专业不一样的话用逗号连接
-技能:xxx 多个技能用逗号连接
-学历:xxx 写专科/本科/硕士/博士
-本科毕业院校：xxx
-本科学校水平:xxx 国内高校写985211，如果既是985又是211就写985211，只是211就写211，双非就为null，海外高校写qs排名
-研究生毕业院校:xxx
-研究生毕业学校水平:xxx 国内高校写985211，如果既是985又是211就写985211，只是211就写211，双非就为null，海外高校写qs排名
-是否工科:是或否
-"""
+# 简历文本
     try:
         response = LLM_CLIENT.chat.completions.create(
             model="deepseek-chat",
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": prompt+resume_text[:1000]}],
             temperature=0.1
         )
         content = response.choices[0].message.content.strip().split("\n")

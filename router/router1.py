@@ -14,6 +14,20 @@ router1 = APIRouter()
 class ConditionBody(BaseModel):
     status: Optional[int] = Field(1)
     prompt:Optional[str] = Field("""设定具体的筛选条件""")
+    format_prompt:Optional[str] = Field("""
+    你负责从简历中提取候选人的核心信息，返回格式（每行一个字段，顺序不变）,如果无该信息就填null：
+    姓名:xxx
+    年龄:xxx
+    联系方式:xxx
+    专业:xxx 本科和硕士博士专业不一样的话用逗号连接
+    技能:xxx 多个技能用逗号连接
+    学历:xxx 写专科/本科/硕士/博士
+    本科毕业院校：xxx
+    本科学校水平:xxx 国内高校写985211，如果既是985又是211就写985211，只是211就写211，双非就为null，海外高校写qs排名
+    研究生毕业院校:xxx
+    研究生毕业学校水平:xxx 国内高校写985211，如果既是985又是211就写985211，只是211就写211，双非就为null，海外高校写qs排名
+    是否工科:是或否
+    """)
     is_deleted: Optional[int] = Field(0)
 
 
@@ -30,12 +44,13 @@ async def add_filter_condition(req: ConditionBody):
 
     try:
         prompt = req.prompt
+        format_prompt = req.format_prompt
         # 2) 插入
         sql = """
-        INSERT INTO filter_condition (prompt)
+        INSERT INTO filter_condition prompt,format_prompt
         VALUES (%s)
         """
-        cursor.execute(sql, (prompt,)) #("""INSERT INTO filter_condition (condition_json,prompt,is_deleted)VALUES (%s, 0)""",condition_json_str)
+        cursor.execute(sql, (prompt,format_prompt)) #("""INSERT INTO filter_condition (condition_json,prompt,is_deleted)VALUES (%s, 0)""",condition_json_str)
         conn.commit()
 
         new_filter_condition_id = cursor.lastrowid
@@ -80,7 +95,8 @@ async def list_filter_condition_summary():
 class UpdateFilterConditionReq(BaseModel):
     id: int = Field(..., gt=0)
     prompt:Optional[str] = Field(None)
-    is_deleted:Optional[int] = Field(None, decription='在这个接口也可以做逻辑删除')
+    format_prompt:Optional[str] = Field(None)
+    is_deleted:Optional[int] = Field(None, description='在这个接口也可以做逻辑删除')
     status:Optional[int] = Field(1, ge=0)
 
 @router1.put("/update_filter_condition", summary="更新筛选条件")
@@ -111,6 +127,27 @@ async def update_filter_condition(req: UpdateFilterConditionReq):
                 (req.prompt,req.id))  # 占位符+绑定参数      #MySQL 执行UPDATE时，即使WHERE条件匹配不到任何记录，也不会报错，只是 “影响行数为 0”。
             total_affected += cursor.rowcount
 
+        if req.format_prompt and req.format_prompt != 'string':
+            cursor.execute(
+                """
+                SELECT prompt
+                FROM filter_condition
+                WHERE id=%s AND is_deleted=0
+                """,
+                (req.id,))
+            row = cursor.fetchone()  # 前面定义了cursor的fetch返回字典
+
+            if not row:
+                raise HTTPException(status_code=404, detail="记录不存在或已删除")
+
+            cursor.execute(
+                """
+                UPDATE filter_condition
+                SET format_prompt=%s
+                WHERE id=%s AND is_deleted=0
+                """,
+                (req.format_prompt, req.id))  # 占位符+绑定参数      #MySQL 执行UPDATE时，即使WHERE条件匹配不到任何记录，也不会报错，只是 “影响行数为 0”。
+            total_affected += cursor.rowcount
         if req.status==0:
             cursor.execute(
                 """
@@ -176,23 +213,40 @@ def _split_list_param(v: str) -> list[str]:
     """
     支持：'a,b' / 'a b' / 'a, b' / 'a  b'
     """
-    return [x for x in re.split(r"[,\s]+", v.strip()) if x]
+    return [x for x in re.split(r"[,，\s]+", v.strip()) if x]
 
 
+class AndKeywords(BaseModel):
+    age:Optional[str]=Field(None,description='关于年龄的筛选要求')
+    major:Optional[str]=Field(None,description='对于专业的要求')
+    skill: Optional[str] = Field(None, description='对于技能的要求')
+    degree: Optional[str] = Field(None, description='对于学历的要求')
+    bachelor_school_level:Optional[str]=Field(None,description='对于本科学校水平的要求')
+    graduate_school_level: Optional[str] = Field(None, description='对于研究生学校水平的要求')
+    is_engineering_degree: Optional[str] = Field(None, description='是否要求为工科学位')
+
+class OrKeywords(BaseModel):
+    age:Optional[str]=Field(None,description='关于年龄的筛选要求')
+    major:Optional[str]=Field(None,description='对于专业的要求')
+    skill: Optional[str] = Field(None, description='对于技能的要求')
+    degree: Optional[str] = Field(None, description='对于学历的要求')
+    bachelor_school_level:Optional[str]=Field(None,description='对于本科学校水平的要求')
+    graduate_school_level: Optional[str] = Field(None, description='对于研究生学校水平的要求')
+    is_engineering_degree: Optional[str] = Field(None, description='是否要求为工科学位')
+
+class StatusesAndPages(BaseModel):
+    page:int = Field(1, ge=1)
+    page_size:int = Field(10, ge=0,le=100)
+from fastapi import Depends
 @router1.get("/list_filter_condition", summary="分页查询筛选条件（支持多条件AND/OR组合）")
-async def list_filter_condition(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(10, ge=1, le=100),
-    # 基础状态筛选
-    statuses: str | None = Query(None, description="状态多选项（逗号分隔：如0,1）"),
-    # 筛选条件（prompt模糊匹配）
-    and_keywords: str | None = Query(None, description="and逻辑的关键词（逗号分隔：如本科,计算机）"),
-    or_keywords: str | None = Query(None, description="or逻辑的关键词（逗号分隔：如985,211）")
+async def list_filter_condition(one:StatusesAndPages=Depends(),
+                                two:AndKeywords=Depends(),
+                                three:OrKeywords=Depends()
 ):
     conn = _get_connection()
     cursor = conn.cursor()
     try:
-        where = ["is_deleted=0"]  # 基础条件：未逻辑删除
+        where = []  # 基础条件：未逻辑删除
         params: list = []
 
         # 1. 状态筛选（IN）
@@ -205,30 +259,53 @@ async def list_filter_condition(
         # 3. AND关键词：必须同时包含所有关键词
         if and_keywords:
             and_list = _split_list_param(and_keywords)
-            for kw in and_list:
+            if len(_split_list_param(and_keywords))>=2:
+                for kw in and_list:
+                    where.append("LOWER(prompt) LIKE %s")
+                    params.append(f"%{kw.lower()}%")
+            if len(_split_list_param(and_keywords)) == 1:
                 where.append("LOWER(prompt) LIKE %s")
-                params.append(f"%{kw.lower()}%")
+                params.append(f"%{and_list[0]}%")
 
         # 4. OR关键词：至少包含一个关键词
         if or_keywords:
-            or_list = _split_list_param(or_keywords)
-            or_conditions = [f"LOWER(prompt) LIKE %s" for _ in or_list]
-            where.append(' OR '.join(or_conditions))
-            params.extend([f"%{kw.lower()}%" for kw in or_list])
+            if len(_split_list_param(or_keywords)) >=2:
+                or_list = _split_list_param(or_keywords)
+                or_conditions = [f"LOWER(prompt) LIKE %s" for _ in or_list]
+                where.append(' OR '.join(or_conditions))
+                params.extend([f"%{kw.lower()}%" for kw in or_list])
 
-        # 拼接WHERE子句
-        where_sql = " AND ".join(where) if where else "1=1"
+            if len(_split_list_param(or_keywords)) == 1:
+                where.append("LOWER(prompt) LIKE %s")
+                params.append(f"%{_split_list_param(or_keywords)[0]}%")
+
+
+
+        if not statuses:
+            if len(where) >1:
+                where_sql = " AND ".join(where) if where else "1=1"
+            if len(where) == 1:
+                where_sql = where[0]
+            if len(where) == 0:
+                where_sql = "1=1"
+        if statuses:
+            if len(where) >2:
+                where_sql = " AND ".join(where)
+            if len(where) == 2:
+                where_sql = " AND ".join(where)
+            if len(where) == 1:
+                where_sql = where[0]
 
         # 5. 统计总数
         cursor.execute(f"SELECT COUNT(*) AS cnt FROM filter_condition WHERE {where_sql}", params)
-        total = cursor.fetchone()["cnt"] if cursor.fetchone() else 0
-
+        count_result = cursor.fetchone()
+        total = count_result["cnt"] if (count_result and count_result.get("cnt")) else 0
         # 6. 分页查询数据
         offset = (page - 1) * page_size
         cursor.execute(f"""
         SELECT id, prompt, status, is_deleted, created_at, updated_at
         FROM filter_condition
-        WHERE {where_sql}
+        WHERE {where_sql} AND is_deleted=0
         ORDER BY id DESC
         LIMIT %s OFFSET %s
         """, params + [page_size, offset])
