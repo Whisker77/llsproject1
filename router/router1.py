@@ -218,24 +218,6 @@ def _split_list_param(v: str | None) -> list[str]:
     return [x for x in re.split(r"[,，\s]+", v.strip()) if x]
 
 
-class AndKeywords(BaseModel):
-    age:Optional[str]=Field(None,description='关于年龄的筛选要求')
-    major:Optional[str]=Field(None,description='对于专业的要求')
-    skill: Optional[str] = Field(None, description='对于技能的要求')
-    degree: Optional[str] = Field(None, description='对于学历的要求')
-    bachelor_school_level:Optional[str]=Field(None,description='对于本科学校水平的要求')
-    graduate_school_level: Optional[str] = Field(None, description='对于研究生学校水平的要求')
-    is_engineering_degree: Optional[str] = Field(None, description='是否要求为工科学位')
-
-class OrKeywords(BaseModel):
-    age:Optional[str]=Field(None,description='关于年龄的筛选要求')
-    major:Optional[str]=Field(None,description='对于专业的要求')
-    skill: Optional[str] = Field(None, description='对于技能的要求')
-    degree: Optional[str] = Field(None, description='对于学历的要求')
-    bachelor_school_level:Optional[str]=Field(None,description='对于本科学校水平的要求')
-    graduate_school_level: Optional[str] = Field(None, description='对于研究生学校水平的要求')
-    is_engineering_degree: Optional[str] = Field(None, description='是否要求为工科学位')
-
 class StatusesAndPages(BaseModel):
     page:int = Field(1, ge=1)
     page_size:int = Field(10, ge=0,le=100)
@@ -244,6 +226,7 @@ class FilterConditionQuery(BaseModel):
     statuses: Optional[str] = Field(None, description="状态筛选（逗号分隔：如0,1）")
     and_keywords: Optional[str] = Field(None, description="AND关键词（逗号分隔）")
     or_keywords: Optional[str] = Field(None, description="OR关键词（逗号分隔）")
+
 from fastapi import Depends
 @router1.get("/list_filter_condition", summary="分页查询筛选条件（支持多条件AND/OR组合）")
 async def list_filter_condition(paging: StatusesAndPages = Depends(),
@@ -255,7 +238,7 @@ async def list_filter_condition(paging: StatusesAndPages = Depends(),
         where = ["is_deleted=0"]
         params: list = []
         statuses = filters.statuses
-        and_keywords = filters.and_keywords
+        and_keywords = filters.and_keywords #'本科，985'
         or_keywords = filters.or_keywords
 
         # 1. 状态筛选（IN）
@@ -265,9 +248,9 @@ async def list_filter_condition(paging: StatusesAndPages = Depends(),
             params.extend(status_list)
 
         # 3. AND关键词：必须同时包含所有关键词
-        and_list = _split_list_param(and_keywords)
+        and_list = _split_list_param(and_keywords)   #['本科','985']
         if and_list:
-            and_conditions = " AND ".join(["LOWER(prompt) LIKE %s"] * len(and_list))
+            and_conditions = " AND ".join(["LOWER(prompt) LIKE %s"] * len(and_list)) #就算只有一个元素，join会直接返回这个元素不连接，不报错
             where.append(f"({and_conditions})")
             params.extend([f"%{kw.lower()}%" for kw in and_list])
 
@@ -287,7 +270,7 @@ async def list_filter_condition(paging: StatusesAndPages = Depends(),
         # 6. 分页查询数据
         offset = (paging.page - 1) * paging.page_size
         cursor.execute(f"""
-        SELECT id, prompt, status, is_deleted, created_at, updated_at
+        SELECT id, prompt,format_prompt,status, is_deleted, created_at, updated_at
         FROM filter_condition
         WHERE {where_sql}
         ORDER BY id DESC

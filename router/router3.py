@@ -55,7 +55,6 @@ async def talent_list(condition:TalentCondition=Depends(),      #依赖注入使
     cursor = conn.cursor()
     and_keywords = _split_list_param(and_keywords) #['candidate_name','major','school','select_day']
     or_keywords = _split_list_param(or_keywords)   #['candidate_name','major','school','select_day']
-
     condition = condition.model_dump(exclude_none=True) #请求体转为字典
 
     try:
@@ -63,7 +62,7 @@ async def talent_list(condition:TalentCondition=Depends(),      #依赖注入使
         invalid_and = [field for field in and_keywords if field not in allowed_fields]
         invalid_or = [field for field in or_keywords if field not in allowed_fields]
         if invalid_and or invalid_or:
-            invalid_fields = ", ".join(sorted(set(invalid_and + invalid_or)))
+            invalid_fields = ", ".join(sorted(set(invalid_and + invalid_or))) #按字母顺序排序 例如a<b<c
             raise HTTPException(status_code=400, detail=f"无效字段: {invalid_fields}")
 
         if and_keywords:
