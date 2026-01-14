@@ -209,10 +209,12 @@ async def delete_filter_condition(id: int = Query(..., gt=0)):
 
 
 
-def _split_list_param(v: str) -> list[str]:
+def _split_list_param(v: str | None) -> list[str]:
     """
     支持：'a,b' / 'a b' / 'a, b' / 'a  b'
     """
+    if not v:
+        return []
     return [x for x in re.split(r"[,，\s]+", v.strip()) if x]
 
 
@@ -237,17 +239,24 @@ class OrKeywords(BaseModel):
 class StatusesAndPages(BaseModel):
     page:int = Field(1, ge=1)
     page_size:int = Field(10, ge=0,le=100)
+
+class FilterConditionQuery(BaseModel):
+    statuses: Optional[str] = Field(None, description="状态筛选（逗号分隔：如0,1）")
+    and_keywords: Optional[str] = Field(None, description="AND关键词（逗号分隔）")
+    or_keywords: Optional[str] = Field(None, description="OR关键词（逗号分隔）")
 from fastapi import Depends
 @router1.get("/list_filter_condition", summary="分页查询筛选条件（支持多条件AND/OR组合）")
-async def list_filter_condition(one:StatusesAndPages=Depends(),
-                                two:AndKeywords=Depends(),
-                                three:OrKeywords=Depends()
+async def list_filter_condition(paging: StatusesAndPages = Depends(),
+                                filters: FilterConditionQuery = Depends()
 ):
     conn = _get_connection()
     cursor = conn.cursor()
     try:
-        where = []  # 基础条件：未逻辑删除
+        where = ["is_deleted=0"]
         params: list = []
+        statuses = filters.statuses
+        and_keywords = filters.and_keywords
+        or_keywords = filters.or_keywords
 
         # 1. 状态筛选（IN）
         if statuses:
@@ -255,66 +264,41 @@ async def list_filter_condition(one:StatusesAndPages=Depends(),
             where.append(f"status IN ({','.join(['%s']*len(status_list))})")
             params.extend(status_list)
 
-
         # 3. AND关键词：必须同时包含所有关键词
-        if and_keywords:
-            and_list = _split_list_param(and_keywords)
-            if len(_split_list_param(and_keywords))>=2:
-                for kw in and_list:
-                    where.append("LOWER(prompt) LIKE %s")
-                    params.append(f"%{kw.lower()}%")
-            if len(_split_list_param(and_keywords)) == 1:
-                where.append("LOWER(prompt) LIKE %s")
-                params.append(f"%{and_list[0]}%")
+        and_list = _split_list_param(and_keywords)
+        if and_list:
+            and_conditions = " AND ".join(["LOWER(prompt) LIKE %s"] * len(and_list))
+            where.append(f"({and_conditions})")
+            params.extend([f"%{kw.lower()}%" for kw in and_list])
 
         # 4. OR关键词：至少包含一个关键词
-        if or_keywords:
-            if len(_split_list_param(or_keywords)) >=2:
-                or_list = _split_list_param(or_keywords)
-                or_conditions = [f"LOWER(prompt) LIKE %s" for _ in or_list]
-                where.append(' OR '.join(or_conditions))
-                params.extend([f"%{kw.lower()}%" for kw in or_list])
+        or_list = _split_list_param(or_keywords)
+        if or_list:
+            or_conditions = " OR ".join(["LOWER(prompt) LIKE %s"] * len(or_list))
+            where.append(f"({or_conditions})")
+            params.extend([f"%{kw.lower()}%" for kw in or_list])
 
-            if len(_split_list_param(or_keywords)) == 1:
-                where.append("LOWER(prompt) LIKE %s")
-                params.append(f"%{_split_list_param(or_keywords)[0]}%")
-
-
-
-        if not statuses:
-            if len(where) >1:
-                where_sql = " AND ".join(where) if where else "1=1"
-            if len(where) == 1:
-                where_sql = where[0]
-            if len(where) == 0:
-                where_sql = "1=1"
-        if statuses:
-            if len(where) >2:
-                where_sql = " AND ".join(where)
-            if len(where) == 2:
-                where_sql = " AND ".join(where)
-            if len(where) == 1:
-                where_sql = where[0]
+        where_sql = " AND ".join(where) if where else "1=1"
 
         # 5. 统计总数
         cursor.execute(f"SELECT COUNT(*) AS cnt FROM filter_condition WHERE {where_sql}", params)
         count_result = cursor.fetchone()
         total = count_result["cnt"] if (count_result and count_result.get("cnt")) else 0
         # 6. 分页查询数据
-        offset = (page - 1) * page_size
+        offset = (paging.page - 1) * paging.page_size
         cursor.execute(f"""
         SELECT id, prompt, status, is_deleted, created_at, updated_at
         FROM filter_condition
-        WHERE {where_sql} AND is_deleted=0
+        WHERE {where_sql}
         ORDER BY id DESC
         LIMIT %s OFFSET %s
-        """, params + [page_size, offset])
+        """, params + [paging.page_size, offset])
         rows = cursor.fetchall()
 
         return {
             "total": total,
-            "page": page,
-            "page_size": page_size,
+            "page": paging.page,
+            "page_size": paging.page_size,
             "list": rows
         }
     except pymysql.MySQLError as e:
