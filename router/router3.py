@@ -35,7 +35,7 @@ COMPUTER_MAJOR_MAPPING = {   #这里做一个专业关联映射，前端设定�
 }
 
 import re
-def _split_list_param(v: str) -> list[str]:
+def _split_list_param(v: str | None) -> list[str]:
     """
     支持：'a,b' / 'a b' / 'a, b' / 'a  b'
     """
@@ -59,44 +59,60 @@ async def talent_list(condition:TalentCondition=Depends(),      #依赖注入使
     condition = condition.model_dump(exclude_none=True) #请求体转为字典
 
     try:
+        allowed_fields = {"candidate_name", "major", "school", "select_day"}
+        invalid_and = [field for field in and_keywords if field not in allowed_fields]
+        invalid_or = [field for field in or_keywords if field not in allowed_fields]
+        if invalid_and or invalid_or:
+            invalid_fields = ", ".join(sorted(set(invalid_and + invalid_or)))
+            raise HTTPException(status_code=400, detail=f"无效字段: {invalid_fields}")
+
         if and_keywords:
             and_conditions = []  #['candidate_name like %s','major like %s']
-            for _ in and_keywords:
-                if _ == 'school':
-                    and_conditions.append('bachelor_school like %s or graduate_school like %s')
-                    params.append(f'%{condition.get('school')}%')
-                    params.append(f'%{condition.get('school')}%')
+            for field in and_keywords:
+                if field == 'school':
+                    value = condition.get("school")
+                    if value is None:
+                        raise HTTPException(status_code=400, detail="缺少school筛选值")
+                    and_conditions.append('(bachelor_school LIKE %s OR graduate_school LIKE %s)')
+                    params.extend([f"%{value}%", f"%{value}%"])
+                elif field == "select_day":
+                    value = condition.get("select_day")
+                    if value is None:
+                        raise HTTPException(status_code=400, detail="缺少select_day筛选值")
+                    and_conditions.append("select_day = %s")
+                    params.append(value)
                 else:
-                    and_conditions.append(f'{_} like %s')
-                    v = condition.get(_)
-                    params.append(f'%{v}%')
-            if len(and_conditions) == 1:
-                where.append(and_conditions[0])
-            if len(and_conditions) >= 2:
-                where.append(f"({' AND '.join(and_conditions)})")        #['candidate_name like %s AND major like %s']
-
+                    value = condition.get(field)
+                    if value is None:
+                        raise HTTPException(status_code=400, detail=f"缺少{field}筛选值")
+                    and_conditions.append(f"{field} LIKE %s")
+                    params.append(f"%{value}%")
+            where.append(f"({' AND '.join(and_conditions)})")
 
         if or_keywords:
             or_conditions = []    #['school like %s','select_day like %s']
-            for _ in or_keywords:
-                if _ == 'school':
-                    or_conditions.append('bachelor_school like %s or graduate_school like %s')
-                    params.append(f'%{condition.get('school')}%')
-                    params.append(f'%{condition.get('school')}%')
+            for field in or_keywords:
+                if field == 'school':
+                    value = condition.get("school")
+                    if value is None:
+                        raise HTTPException(status_code=400, detail="缺少school筛选值")
+                    or_conditions.append('(bachelor_school LIKE %s OR graduate_school LIKE %s)')
+                    params.extend([f"%{value}%", f"%{value}%"])
+                elif field == "select_day":
+                    value = condition.get("select_day")
+                    if value is None:
+                        raise HTTPException(status_code=400, detail="缺少select_day筛选值")
+                    or_conditions.append("select_day = %s")
+                    params.append(value)
                 else:
-                    or_conditions.append(f"{_} LIKE %s")
-                    v = condition.get(_)
-                    params.append(f'%{v}%')
-            if len(or_conditions) == 1:
-                where.append(or_conditions[0])
-            if len(or_conditions) >= 2:
-                where.append(f"({' or '.join(or_conditions)})")          #['candidate_name like %s AND major like %s','school like %s OR select_day like %s]
+                    value = condition.get(field)
+                    if value is None:
+                        raise HTTPException(status_code=400, detail=f"缺少{field}筛选值")
+                    or_conditions.append(f"{field} LIKE %s")
+                    params.append(f"%{value}%")
+            where.append(f"({' OR '.join(or_conditions)})")
 
-
-        if len(where) >= 2:
-            where_sql = ' OR '.join(where)
-        else:
-            where_sql = where[0] if len(where) == 1 else '1=1'
+        where_sql = ' AND '.join(where) if where else '1=1'
         offset = (page - 1) * page_size
         complete_sql = f'select * from talent_info_table where {where_sql} LIMIT %s OFFSET %s'
         params.append(page_size)
@@ -104,10 +120,12 @@ async def talent_list(condition:TalentCondition=Depends(),      #依赖注入使
         cursor.execute(complete_sql, params)
         data = cursor.fetchall()
         if len(data) >= 1:
-            cursor.close()
-            conn.close()
             return data
-        else:
-            raise HTTPException(status_code=400,detail='未找到符合您要求的候选人才')
+        raise HTTPException(status_code=400,detail='未找到符合您要求的候选人才')
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
