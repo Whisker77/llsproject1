@@ -47,8 +47,8 @@ async def add_filter_condition(req: ConditionBody):
         format_prompt = req.format_prompt
         # 2) 插入
         sql = """
-        INSERT INTO filter_condition prompt,format_prompt
-        VALUES (%s)
+        INSERT INTO filter_condition (prompt,format_prompt)
+        VALUES (%s,%s)
         """
         cursor.execute(sql, (prompt,format_prompt)) #("""INSERT INTO filter_condition (condition_json,prompt,is_deleted)VALUES (%s, 0)""",condition_json_str)
         conn.commit()

@@ -241,14 +241,14 @@ def llm_process_resume(resume_text: str,prompt:str) -> dict:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"大模型处理失败: {str(e)}")
 
-def fetch_filter_condition(filter_condition_id: int) -> str:
+def fetch_filter_condition(filter_condition_id: int) -> tuple:
     conn = None
     cursor = None
     try:
         conn = pymysql.connect(**DB_CONF)
         cursor = conn.cursor()
         sql = """
-            SELECT prompt,status,is_deleted
+            SELECT prompt,format_prompt,status,is_deleted
             FROM filter_condition
             WHERE id=%s 
         """
@@ -257,13 +257,13 @@ def fetch_filter_condition(filter_condition_id: int) -> str:
         if not row:
             raise HTTPException(status_code=404, detail="筛选条件不存在或已删除")
 
-        prompt,status,is_deleted = row
+        prompt,format_prompt,status,is_deleted = row
 
         if status != 1:
             raise HTTPException(status_code=400, detail="筛选条件不可用")
         if is_deleted == 1:
             raise HTTPException(status_code =400,detail='筛选条件已被逻辑删除')
-        return prompt or ''
+        return (prompt,format_prompt)
     finally:
         if cursor:
             cursor.close()
@@ -309,7 +309,7 @@ async def process_resumes(
     matched_results = []
     failed_files = []
     avatar_success_count = 0
-    prompt_str = fetch_filter_condition(filter_condition_id)
+    prompt_str,format_prompt = fetch_filter_condition(filter_condition_id)
     for file in files:
         try:
             # 1. 校验文件类型
@@ -331,7 +331,7 @@ async def process_resumes(
 
             # 4. 大模型筛选+信息提取
             try:
-                resume_info = llm_process_resume(resume_text)
+                resume_info = llm_process_resume(resume_text,format_prompt)
             except HTTPException as e:
                 raise ValueError(f"大模型处理失败: {e.detail}") from e
 

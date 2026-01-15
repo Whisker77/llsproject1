@@ -110,7 +110,9 @@ async def talent_list(condition:TalentCondition=Depends(),      #依赖注入使
                     or_conditions.append(f"{field} LIKE %s")
                     params.append(f"%{value}%")
             where.append(f"({' OR '.join(or_conditions)})")
-
+        if condition and not and_keywords and not or_keywords:
+            where.append(f"{list(condition.keys())[0]} like %s")
+            params.append(f'%{list(condition.values())[0]}%')
         where_sql = ' AND '.join(where) if where else '1=1'
         offset = (page - 1) * page_size
         complete_sql = f'select * from talent_info_table where {where_sql} LIMIT %s OFFSET %s'
