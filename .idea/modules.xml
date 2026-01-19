@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/../aiagent/.idea/aiagent.iml" filepath="$PROJECT_DIR$/../aiagent/.idea/aiagent.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../leetcode/.idea/leetcode.iml" filepath="$PROJECT_DIR$/../leetcode/.idea/leetcode.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/lssProject1.iml" filepath="$PROJECT_DIR$/.idea/lssProject1.iml" />
     </modules>
   </component>

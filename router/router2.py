@@ -480,7 +480,7 @@ async def process_resumes(
                                 SET age = %s, contact = %s, skill = %s, degree = %s,
                                     bachelor_school_level = %s, graduate_school = %s, graduate_school_level = %s,
                                     is_engineering_degree = %s, resume_minio_path = %s, portrait_minio_path = %s,
-                                    resume_file_name = %s, select_day = CURRENT_DATE
+                                    resume_file_name = %s, select_day = current_date
                                 WHERE id = %s
                             """
                         talent_update_vals = (
