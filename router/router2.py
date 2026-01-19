@@ -275,18 +275,11 @@ def llm_judge_resume_match(resume_info: dict, condition:str) -> bool:
         raise HTTPException(status_code=400,detail='筛选条件为空,请重新设定可用的筛选条件')
 
     prompt = f"""
-你是人才筛选助手，请根据筛选条件判断候选人是否满足条件，仅返回"是"或"否"。
 
-筛选条件（空或null字段表示不限制）：
+
 {json.dumps(condition,ensure_ascii=False)}
 
-
-候选人信息（JSON）：
 {json.dumps(resume_info, ensure_ascii=False)}
-
-判断规则：
-上面给你的condition已经给你了明确的筛选条件具体内容和判断准则，包含设定的筛选条件和补充说明的提示词。
-你根据已给的筛选规则比对同时给到你的候选人信息做条件判断，输出候选人是否符合筛选条件的判断。
 """
     try:
         response = LLM_CLIENT.chat.completions.create(
@@ -498,6 +491,7 @@ async def process_resumes(
                             talent_existing_id[0]
                         )
                         cursor.execute(talent_update_sql, talent_update_vals)
+                        conn.commit()
                         talent_status = "已覆盖（ID：{}）".format(talent_existing_id[0])
                     else:
                         insert_sql = """
