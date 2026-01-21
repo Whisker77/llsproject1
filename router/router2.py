@@ -274,13 +274,7 @@ def llm_judge_resume_match(resume_info: dict, condition:str) -> bool:
     if len(condition)==0:
         raise HTTPException(status_code=400,detail='筛选条件为空,请重新设定可用的筛选条件')
 
-    prompt = f"""
-
-
-{json.dumps(condition,ensure_ascii=False)}
-
-{json.dumps(resume_info, ensure_ascii=False)}
-"""
+    prompt = condition.format(resume_info=json.dumps(resume_info, ensure_ascii=False))
     try:
         response = LLM_CLIENT.chat.completions.create(
             model="deepseek-chat",
