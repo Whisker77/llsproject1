@@ -8,5 +8,6 @@
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="module" module-name="aiagent" />
     <orderEntry type="module" module-name="leetcode" />
+    <orderEntry type="module" module-name="langgraph_document" />
   </component>
 </module>
